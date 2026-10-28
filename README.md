@@ -14,18 +14,18 @@
 
 ## 어디서 돌릴까요?
 
-두 방법 모두 같은 프로그램과 같은 설정을 써서 결과도 같아요. 편한 쪽을 고르면 되고, 둘 다 써도 돼요.
+세 방법 모두 같은 프로그램과 같은 설정을 써서 결과도 같아요. 편한 쪽을 고르면 되고, 섞어 써도 돼요.
 
-| | A. Colab | B. 내 컴퓨터 |
-|---|---|---|
-| 필요한 것 | 구글 계정 | NVIDIA 그래픽카드 (VRAM 8GB 이상 권장) |
-| 설치 | 없음 (처음에 토큰만 한 번 설정) | 처음 한 번 설치 (10~30분) |
-| 속도 | 무료 T4 GPU | 그래픽카드에 따라 달라요. 최근 RTX 계열이면 대체로 더 빨라요 |
-| 제한 | 세션 최대 약 12시간, 90분 동안 조작이 없으면 끊김, GPU를 못 받는 때도 있음 | 없음 |
-| 화면 | Colab 노트북 | 브라우저에 열리는 전용 화면 |
+| | A. Colab 노트북 | B. 내 컴퓨터 | C. 배치파일로 Colab 자동 실행 |
+|---|---|---|---|
+| 필요한 것 | 구글 계정 | NVIDIA 그래픽카드 (VRAM 8GB 이상 권장) | 구글 계정, 윈도우 PC (그래픽카드 필요 없음) |
+| 설치 | 없음 (처음에 토큰만 한 번 설정) | 처음 한 번 설치 (10~30분) | 처음 한 번 설정 (10분 정도) |
+| 실행 | 노트북 셀을 차례로 실행 | 브라우저 화면에서 시작 | 폴더 경로만 입력하면 끝까지 자동 |
+| 속도 | 무료 T4 GPU | 그래픽카드에 따라 달라요 | 무료 T4 GPU |
+| 제한 | 세션 최대 약 12시간, 90분 동안 조작이 없으면 끊김, GPU를 못 받는 때도 있음 | 없음 | A와 같음 |
 
-- 그래픽카드가 없거나 AMD·Intel 그래픽이면 **A. Colab**을 쓰세요.
-- NVIDIA 그래픽카드가 있는 컴퓨터라면 **B. 내 컴퓨터**가 더 편해요.
+- 그래픽카드가 없거나 AMD·Intel 그래픽이면 **A** 또는 **C**를 쓰세요. 손이 덜 가는 건 **C**예요.
+- NVIDIA 그래픽카드가 있는 컴퓨터라면 **B**가 편해요.
 
 ## A. Colab에서 쓰기
 
@@ -101,6 +101,60 @@
 ./run.sh
 ```
 
+## C. 배치파일 하나로 Colab 자동 실행
+
+폴더 경로만 입력하면 나머지는 전부 자동이에요.
+
+1. 영상을 Google Drive의 `subtitle-remover/input/YYYYMMDDHH` 폴더에 올려요 (실행할 때마다 새 폴더).
+2. Colab에 T4 GPU 런타임을 켜고, GitHub에서 최신 코드를 받아요.
+3. 자막을 지워서 Drive의 `subtitle-remover/output/YYYYMMDDHH` 폴더에 저장해요.
+4. 런타임을 끄고, 결과 폴더를 열어 줘요.
+
+구글이 2026년에 내놓은 공식 [Colab CLI](https://github.com/googlecolab/google-colab-cli)(명령어로 Colab을 쓰는 도구)를 써서, 브라우저에서 Colab을 직접 열 필요가 없어요.
+
+### 처음 한 번만
+
+1. [python.org/downloads](https://www.python.org/downloads/)에서 **Python 3.12**를 설치해요. 설치 첫 화면에서 **Add python.exe to PATH**에 꼭 체크하세요.
+2. (권장) [Google Drive 데스크톱 앱](https://www.google.com/drive/download/)을 설치하고, Colab에 쓸 구글 계정으로 로그인해요.
+   - 없어도 되지만, 있으면 영상 업로드가 빠르고 안정적이에요. 결과도 내 컴퓨터의 Drive 폴더에 바로 보여요.
+   - 없으면 영상을 Colab으로 직접 올리고, 결과는 영상 폴더 안의 `subtitle-remover-output`에도 받아 와요.
+3. GitHub 토큰을 준비해요. 만드는 방법은 [A의 1번](#a-colab에서-쓰기)과 같아요.
+4. 코드를 받아요. GitHub 저장소에서 **Code → Download ZIP**을 누르고, `C:\subtitle-remover`처럼 짧은 경로에 압축을 풀어요.
+5. **colab_setup.bat**을 더블클릭해요.
+   - GitHub 토큰을 붙여 넣어요 (창에서 오른쪽 클릭 = 붙여넣기).
+   - 브라우저가 열리면 구글 계정으로 로그인하고 허용해요. 화면에 나온 **인증 코드**를 복사해서 창에 붙여 넣고 Enter를 눌러요.
+   - T4 시험 연결 중에 Drive 허용 주소가 열리면 허용하고, 창으로 돌아와 Enter를 눌러요.
+   - **✅ 준비 완료!**가 나오면 끝이에요.
+
+### 매번
+
+1. **colab_run.bat**을 더블클릭하고, 영상이 있는 폴더 경로를 입력하고 Enter를 눌러요. 영상 폴더를 colab_run.bat 위로 끌어다 놓아도 돼요.
+2. 진행 상황이 창에 표시돼요. **끝날 때까지 창을 닫지 마세요.** 닫으면 Colab 런타임이 한동안 켜진 채로 남아서 무료 사용량을 쓸 수 있어요.
+3. 끝나면 결과 폴더가 열려요. 결과 파일 이름은 `원래이름_clean.mp4`예요.
+
+참고할 점이에요.
+- 같은 시간대(같은 YYYYMMDDHH)에 또 실행하면 `YYYYMMDDHH_2` 폴더가 새로 생겨요.
+- GPU를 받지 못해 실패해도 Drive에 올라간 영상은 남아 있어서, 다음 실행 때 같이 처리돼요.
+- 런타임이 켜진 채로 남은 것 같으면 **colab_stop.bat**을 실행하세요.
+
+### 설정 바꾸기
+
+`%APPDATA%\subtitle-remover\colab.json` 파일을 메모장으로 열어 값을 바꾸면 돼요. 파일은 colab_setup.bat이 만들어요.
+
+| 항목 | 값 |
+|---|---|
+| `quality` | `빠르게`, `보통`, `최고` |
+| `region` | `전체 화면`, `아래쪽 절반`, `아래쪽 1/3`, `위쪽 절반`, `위쪽 1/3`, `직접 입력` |
+| `custom_region` | region이 `직접 입력`일 때 `x0,y0,x1,y1` (0~1 비율) |
+| `target` | `overlay`(화면에 고정된 자막·글자만) 또는 `all`(모든 글자) |
+| `drive_root` | Drive 앱 폴더를 못 찾을 때 직접 지정. JSON이라 역슬래시는 두 번 써요 (예: `"G:\\내 드라이브"`) |
+
+### 알아둘 점
+
+- **윈도우 지원**: Colab CLI는 아직 리눅스와 맥만 공식 지원해요. 코드에 윈도우 대비가 들어 있어서 동작할 가능성이 높지만, 안 되면 알려 주세요. 그때는 WSL(윈도우 안의 리눅스)로 돌리는 방법을 안내할게요.
+- **무료 계정**: CLI로 무료 T4를 받을 수 있는지는 공식 문서에 분명히 나와 있지 않아요. colab_setup.bat의 시험 연결에서 바로 확인돼요.
+- Colab 이용 약관이 그대로 적용돼요.
+
 ## 설정 설명 (공통)
 
 | 설정 | 설명 |
@@ -164,11 +218,13 @@ subtitle_remover/
   pipeline.py      전체 흐름 (찾기 → 메꾸기 → 합치기)
   cli.py           명령어
   app.py           내 컴퓨터용 브라우저 화면
+  colab_job.py     Colab 런타임에서 Drive의 작업을 처리 (C)
 colab/             Colab 노트북 (tools/build_notebook.py로 생성)
-tools/             설치, 합성 테스트 영상 만들기, 품질 측정, 노트북 생성
+tools/             설치, Colab 자동 실행(colab_auto.py), 합성 테스트 영상, 품질 측정, 노트북 생성
 tests/             자동 테스트 (pytest)
 samples/           테스트용 영상을 올리는 곳
-install_windows.bat, run_windows.bat, install.sh, run.sh
+install_windows.bat, run_windows.bat, install.sh, run.sh     내 컴퓨터용 (B)
+colab_setup.bat, colab_run.bat, colab_stop.bat             Colab 자동 실행용 (C)
 ```
 
 ## 개발 메모

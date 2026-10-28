@@ -15,7 +15,7 @@ import tempfile
 import threading
 from pathlib import Path
 
-from .config import Config, apply_quality, parse_region
+from .config import QUALITY_LABELS, REGION_LABELS, TARGET_LABELS, Config, config_from_choices
 from .device import gpu_info
 from .pipeline import SubtitleRemover
 from .video_io import list_videos, make_comparison
@@ -23,22 +23,15 @@ from .video_io import list_videos, make_comparison
 log = logging.getLogger("subtitle_remover")
 
 TASKS = ["자막 지우기", "마스크만 확인"]
-QUALITIES = {"빠르게": "fast", "보통": "balanced", "최고": "best"}
-REGIONS = {"전체 화면": "all", "아래쪽 절반": "bottom", "아래쪽 1/3": "bottom-third",
-           "위쪽 절반": "top", "위쪽 1/3": "top-third", "직접 입력": None}
-TARGETS = {"화면에 고정된 자막·글자만 (권장)": "overlay", "간판 등 모든 글자": "all"}
+QUALITIES, REGIONS, TARGETS = QUALITY_LABELS, REGION_LABELS, TARGET_LABELS
 DEFAULT_OUTPUT = Path.cwd() / "output"
 PREVIEW_DIR = Path(tempfile.gettempdir()) / "subtitle_remover_preview"
 
 
 def build_config(quality: str, region: str, custom_region: str, target: str, save_preview: bool,
                  method: str = "propainter") -> Config:
-    cfg = apply_quality(Config(), QUALITIES[quality])
-    region_text = REGIONS.get(region) or custom_region
-    cfg.filter.regions = [r for part in region_text.split(";") if part.strip() for r in parse_region(part)]
-    cfg.filter.target = TARGETS[target]
+    cfg = config_from_choices(quality, region, target, custom_region, method)
     cfg.output.debug = save_preview
-    cfg.inpaint.method = method
     return cfg
 
 

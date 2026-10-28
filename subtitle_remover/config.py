@@ -127,3 +127,24 @@ def apply_quality(cfg: Config, quality: str) -> Config:
     else:
         raise ValueError(f"알 수 없는 품질 설정: {quality} ({', '.join(QUALITY_PRESETS)})")
     return cfg
+
+
+# Korean labels used by the notebook, the local UI and colab_run.bat jobs
+QUALITY_LABELS = {"빠르게": "fast", "보통": "balanced", "최고": "best"}
+REGION_LABELS = {"전체 화면": "all", "아래쪽 절반": "bottom", "아래쪽 1/3": "bottom-third",
+                 "위쪽 절반": "top", "위쪽 1/3": "top-third", "직접 입력": None}
+TARGET_LABELS = {"화면에 고정된 자막·글자만 (권장)": "overlay", "간판 등 모든 글자": "all"}
+
+
+def config_from_choices(quality: str = "보통", region: str = "전체 화면", target: str = "overlay",
+                        custom_region: str = "", method: str = "propainter") -> Config:
+    """Build a Config from UI choices; each accepts the Korean label or the internal value."""
+    cfg = apply_quality(Config(), QUALITY_LABELS.get(quality, quality))
+    region_text = region if region not in REGION_LABELS else (REGION_LABELS[region] or custom_region)
+    cfg.filter.regions = [r for part in region_text.split(";") if part.strip() for r in parse_region(part)]
+    target = TARGET_LABELS.get(target, target)
+    if target not in ("overlay", "all"):
+        raise ValueError(f"알 수 없는 대상: {target} (overlay, all 중 선택)")
+    cfg.filter.target = target
+    cfg.inpaint.method = method
+    return cfg
