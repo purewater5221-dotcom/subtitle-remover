@@ -1,0 +1,19 @@
+# FFmpeg must be installed on the system (Colab already has it).
+
+# text detection + video processing
+numpy>=1.24
+opencv-python-headless>=4.8
+onnxruntime>=1.18        # on a GPU machine (Colab) install onnxruntime-gpu instead
+rapidocr==3.10.0         # only its bundled PP-OCRv6 detection model is used
+tqdm
+pillow                   # tools/make_synthetic.py
+
+# ProPainter inpainting
+torch>=2.0
+torchvision
+einops
+scipy
+matplotlib
+
+# tests
+pytest
