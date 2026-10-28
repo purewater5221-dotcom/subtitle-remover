@@ -42,10 +42,20 @@ class VideoError(RuntimeError):
     pass
 
 
+@lru_cache(maxsize=None)
 def _tool(name: str) -> str:
     path = shutil.which(name)
     if not path:
-        raise VideoError(f"{name}을(를) 찾을 수 없습니다. FFmpeg를 설치해 주세요.")
+        # Windows usually has no FFmpeg: the static-ffmpeg package downloads one on first use
+        try:
+            import static_ffmpeg
+
+            static_ffmpeg.add_paths(weak=True)
+        except Exception:  # noqa: BLE001 - not installed or offline
+            pass
+        path = shutil.which(name)
+    if not path:
+        raise VideoError(f"{name}을(를) 찾을 수 없습니다. FFmpeg를 설치하거나 'pip install static-ffmpeg'를 실행해 주세요.")
     return path
 
 
@@ -153,18 +163,22 @@ def read_frames(info: VideoInfo) -> Iterator[np.ndarray]:
     with tempfile.TemporaryFile() as err:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, bufsize=frame_bytes)
         assert proc.stdout is not None
+        finished = False
         try:
             while True:
                 buf = proc.stdout.read(frame_bytes)
                 if len(buf) < frame_bytes:
+                    finished = True
                     break
                 yield np.frombuffer(buf, np.uint8).reshape(info.height, info.width, 3)
         finally:
-            proc.stdout.close()
-            if proc.poll() is None:
+            # The consumer may stop early; only then is ffmpeg killed (its exit
+            # code is platform dependent, so it is not checked in that case).
+            if not finished and proc.poll() is None:
                 proc.kill()
+            proc.stdout.close()
             rc = proc.wait()
-        if rc not in (0, -9):
+        if rc != 0:
             err.seek(0)
             raise VideoError(f"디코딩 실패 ({info.path.name}): {err.read().decode(errors='replace')[-800:]}")
 
@@ -260,6 +274,20 @@ def copy_as_mp4(src: str | Path, dst: str | Path) -> None:
         if res.returncode == 0:
             return
     shutil.copyfile(src, dst)
+
+
+def make_comparison(src: str | Path, dst: str | Path, out: str | Path, height: int = 640) -> Path:
+    """Small side-by-side preview (original | result) without audio."""
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [_tool("ffmpeg"), "-v", "error", "-nostdin", "-y", "-i", str(src), "-i", str(dst), "-filter_complex",
+           f"[0:v]scale=-2:{height},setsar=1[a];[1:v]scale=-2:{height},setsar=1[b];[a][b]hstack",
+           "-c:v", "libx264", "-crf", "26", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-an",
+           "-movflags", "+faststart", str(out)]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0:
+        raise VideoError(f"비교 영상을 만들지 못했습니다: {res.stderr[-500:]}")
+    return out
 
 
 def list_videos(path: str | Path) -> list[Path]:

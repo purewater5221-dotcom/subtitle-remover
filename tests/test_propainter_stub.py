@@ -108,3 +108,27 @@ def test_wrapper_pads_very_short_clips(stub_root):
     masks = np.ones((1, 16, 16), np.uint8)
     out = ip.inpaint(frames, masks)
     assert out.shape == (1, 16, 16, 3) and (out == 191).all()
+
+
+def test_ensure_propainter_without_git_uses_source_zip(tmp_path, monkeypatch):
+    import zipfile
+
+    from subtitle_remover.inpaint import propainter
+
+    archive = tmp_path / "src.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("ProPainter-abc123/model/propainter.py", "# stub")
+        z.writestr("ProPainter-abc123/RAFT/__init__.py", "")
+    release = tmp_path / "release"
+    release.mkdir()
+    for name in WEIGHTS:
+        (release / name).write_bytes(b"w")
+    monkeypatch.setattr(propainter.shutil, "which", lambda name: None)
+    monkeypatch.setattr(propainter, "REPO_ZIP_URL", archive.as_uri())
+    monkeypatch.setattr(propainter, "WEIGHTS_URL", release.as_uri() + "/")
+
+    root = propainter.ensure_propainter(tmp_path / "cache" / "ProPainter")
+    assert (root / "model" / "propainter.py").exists() and (root / "RAFT").is_dir()
+    assert all((root / "weights" / n).read_bytes() == b"w" for n in WEIGHTS)
+    assert not (tmp_path / "cache" / "ProPainter.zip").exists()
+    assert propainter.ensure_propainter(root) == root  # second call: nothing to do

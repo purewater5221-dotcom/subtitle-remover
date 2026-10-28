@@ -14,9 +14,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import urllib.request
+import zipfile
 from pathlib import Path
 
 import cv2
@@ -28,6 +30,7 @@ log = logging.getLogger(__name__)
 
 REPO_URL = "https://github.com/sczhou/ProPainter.git"
 REPO_COMMIT = "326782529a63d997cab80ab21439b92ed422b3d3"
+REPO_ZIP_URL = f"https://github.com/sczhou/ProPainter/archive/{REPO_COMMIT}.zip"
 WEIGHTS_URL = "https://github.com/sczhou/ProPainter/releases/download/v0.1.0/"
 WEIGHTS = ("raft-things.pth", "recurrent_flow_completion.pth", "ProPainter.pth")
 MIN_FRAMES = 3
@@ -47,14 +50,34 @@ def _download(url: str, dest: Path) -> None:
     tmp.rename(dest)
 
 
+def _fetch_code(root: Path) -> None:
+    if shutil.which("git"):
+        try:
+            subprocess.run(["git", "clone", "-q", REPO_URL, str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "checkout", "-q", REPO_COMMIT], check=True)
+            return
+        except subprocess.CalledProcessError:
+            shutil.rmtree(root, ignore_errors=True)
+    # No git (typical on Windows): download the source archive of the same commit
+    archive = root.parent / f"{root.name}.zip"
+    _download(REPO_ZIP_URL, archive)
+    with zipfile.ZipFile(archive) as z:
+        top = z.namelist()[0].split("/")[0]
+        z.extractall(root.parent)
+    (root.parent / top).rename(root)
+    archive.unlink()
+
+
 def ensure_propainter(root: Path | None = None) -> Path:
-    """Clone ProPainter (pinned commit) and download its weights if missing."""
+    """Fetch ProPainter (pinned commit) and its weights if missing."""
     root = Path(root) if root else cache_dir() / "ProPainter"
     if not (root / "model" / "propainter.py").exists():
+        if root.exists() and any(p.name != "weights" for p in root.iterdir()):
+            raise RuntimeError(f"ProPainter 폴더가 손상된 것 같아요. 이 폴더를 지우고 다시 실행해 주세요: {root}")
+        shutil.rmtree(root, ignore_errors=True)  # at most leftover weights from an interrupted setup
         root.parent.mkdir(parents=True, exist_ok=True)
         log.info("ProPainter 코드를 받는 중...")
-        subprocess.run(["git", "clone", "-q", REPO_URL, str(root)], check=True)
-        subprocess.run(["git", "-C", str(root), "checkout", "-q", REPO_COMMIT], check=True)
+        _fetch_code(root)
     for name in WEIGHTS:
         path = root / "weights" / name
         if not path.exists():

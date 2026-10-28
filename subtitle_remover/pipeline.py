@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import logging
@@ -23,6 +24,7 @@ from tqdm.auto import tqdm
 
 from .config import Config
 from .detect import TextBox, TextDetector
+from .device import fit_to_gpu
 from .masks import feather, rasterize
 from .planner import Job, plan_jobs
 from .scenes import SceneDetector
@@ -117,9 +119,12 @@ def _free_gpu() -> None:
 
 class SubtitleRemover:
     def __init__(self, cfg: Config | None = None):
-        self.cfg = cfg or Config()
+        self.cfg = copy.deepcopy(cfg) if cfg else Config()
         self._detector: TextDetector | None = None
         self._inpainter = None
+        note = fit_to_gpu(self.cfg)
+        if note:
+            log.info(note)
 
     @property
     def detector(self) -> TextDetector:

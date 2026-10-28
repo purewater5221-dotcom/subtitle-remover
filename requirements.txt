@@ -1,4 +1,5 @@
-# FFmpeg must be installed on the system (Colab already has it).
+# Local setup: run tools/install.py (picks the right CUDA build of PyTorch).
+# FFmpeg: uses the system one, or static-ffmpeg downloads one (Windows).
 
 # text detection + video processing
 numpy>=1.24
@@ -7,6 +8,8 @@ onnxruntime>=1.18        # on a GPU machine (Colab) install onnxruntime-gpu inst
 rapidocr==3.10.0         # only its bundled PP-OCRv6 detection model is used
 tqdm
 pillow                   # tools/make_synthetic.py
+static-ffmpeg            # FFmpeg for machines without it
+gradio>=4.44             # local web UI (subtitle_remover.app)
 
 # ProPainter inpainting
 torch>=2.0

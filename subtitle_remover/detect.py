@@ -99,6 +99,8 @@ class TextDetector:
         import onnxruntime as ort
 
         path = Path(model_path) if model_path else default_model_path()
+        if hasattr(ort, "disable_telemetry_events"):
+            ort.disable_telemetry_events()
         opts = ort.SessionOptions()
         opts.log_severity_level = 3
         try:

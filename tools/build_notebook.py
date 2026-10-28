@@ -159,23 +159,18 @@ print("\\n끝! ④ 로 결과를 비교해 보세요.")
 
 COMPARE = '''
 #@title ④ 결과 비교 보기 (왼쪽: 원본, 오른쪽: 결과)
-import base64, subprocess
+import base64
 from IPython.display import HTML, display
+from subtitle_remover.video_io import make_comparison
 
 HOW_MANY = 3  #@param {type:"integer"}
 for src, dst in results[-HOW_MANY:]:
     if not dst.exists():
         continue
-    preview = Path("/content/compare") / f"{src.stem}.mp4"
-    preview.parent.mkdir(exist_ok=True)
-    if dst.stem.endswith("_mask"):  # mask preview only: show it as is
-        cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(dst), "-vf", "scale=-2:640", "-c:v", "libx264",
-               "-crf", "28", "-preset", "veryfast", "-an", str(preview)]
+    if dst.stem.endswith("_mask"):  # mask preview only: show it as it is
+        preview = dst
     else:
-        cmd = ["ffmpeg", "-v", "error", "-y", "-i", str(src), "-i", str(dst), "-filter_complex",
-               "[0:v]scale=-2:640,setsar=1[a];[1:v]scale=-2:640,setsar=1[b];[a][b]hstack",
-               "-c:v", "libx264", "-crf", "28", "-preset", "veryfast", "-an", str(preview)]
-    subprocess.run(cmd, check=True)
+        preview = make_comparison(src, dst, Path("/content/compare") / f"{src.stem}.mp4")
     data = base64.b64encode(preview.read_bytes()).decode()
     display(HTML(f"<p><b>{src.name}</b></p><video controls loop muted autoplay playsinline "
                  f"style='max-height:640px;max-width:100%' src='data:video/mp4;base64,{data}'></video>"))
