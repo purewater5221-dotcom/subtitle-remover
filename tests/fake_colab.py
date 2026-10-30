@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 HOME = Path(os.environ["FAKE_COLAB_HOME"])
@@ -53,7 +54,10 @@ if os.environ.get("FAKE_COLAB_AUTH") and not (HOME / "token.json").exists():
     print("\nTo authorize colab-cli, visit this URL in any browser:\n", file=sys.stderr)
     print("  https://accounts.google.com/o/oauth2/auth?client_id=fake\n", file=sys.stderr)
     print("After approving, Google will display an authorization code.", file=sys.stderr)
-    if not input("Enter the authorization code: ").strip():
+    sys.stdout.write("Enter the authorization code: ")
+    sys.stdout.flush()
+    time.sleep(0.5)  # like a person who first signs in in the browser
+    if not sys.stdin.readline().strip():
         sys.exit(1)
     (HOME / "token.json").write_text("{}")
 if cmd == "sessions":
@@ -80,6 +84,7 @@ if cmd == "drivemount":
         print("\n[colab] REQUIRED: Google Drive Authorization needed.\nPlease visit:\n\nhttps://accounts.google.com/drive-consent\n")
         sys.stdout.write("Press Enter after you have granted access... ")
         sys.stdout.flush()
+        time.sleep(0.5)
         sys.stdin.readline()
         print("[colab] Authorizing VM...\n[colab] Credentials propagated. Resuming mount...")
         (HOME / "drive_ok").write_text("1")

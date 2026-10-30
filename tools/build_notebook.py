@@ -73,7 +73,7 @@ print("코드 버전:", subprocess.run(["git", "-C", str(REPO_DIR), "log", "-1",
                                capture_output=True, text=True).stdout.strip())
 
 !pip install -q --no-deps rapidocr==3.10.0
-!pip install -q onnxruntime-gpu einops
+!pip install -q onnxruntime onnx onnx2torch einops
 if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
 

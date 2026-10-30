@@ -42,7 +42,7 @@ def install():
         return
     print("installing packages...", flush=True)
     sh(sys.executable, "-m", "pip", "install", "-q", "--no-deps", "rapidocr==3.10.0")
-    sh(sys.executable, "-m", "pip", "install", "-q", "onnxruntime-gpu", "einops")
+    sh(sys.executable, "-m", "pip", "install", "-q", "onnxruntime", "onnx", "onnx2torch", "einops")
 
 
 fetch_code()

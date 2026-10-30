@@ -20,10 +20,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VENV = ROOT / ".venv"
-# cu12x first: onnxruntime-gpu (text detection) is built against CUDA 12
+# newest CUDA 12 builds first, then CUDA 13, then older ones
 CUDA_TAGS = ["cu128", "cu126", "cu130", "cu129", "cu124", "cu121", "cu118"]
 PACKAGES = ["numpy>=1.24", "opencv-python-headless>=4.8", "tqdm", "pillow", "einops", "scipy", "matplotlib",
-            "gradio>=4.44", "static-ffmpeg"]
+            "gradio>=4.44", "static-ffmpeg", "onnxruntime", "onnx", "onnx2torch"]
 
 
 def say(msg: str) -> None:
@@ -124,8 +124,7 @@ def main() -> int:
             run([py, "-m", "pip", "install", "--upgrade", "torch", "torchvision", *index], dry)
 
     say("\n▶ 나머지 패키지 설치 중...")
-    onnx = "onnxruntime-gpu" if gpu and sys.platform != "darwin" else "onnxruntime"
-    run([py, "-m", "pip", "install", "--upgrade", *PACKAGES, onnx], dry)
+    run([py, "-m", "pip", "install", "--upgrade", *PACKAGES], dry)
     run([py, "-m", "pip", "install", "--no-deps", "rapidocr==3.10.0"], dry)
 
     say("\n▶ FFmpeg와 ProPainter 모델 준비 중...")
