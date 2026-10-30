@@ -144,6 +144,14 @@ class _Echo:
             self.write(self.held)
             self.held = ""
 
+    def note(self, msg: str) -> None:
+        """Print a message of ours, then repeat the CLI's unfinished prompt line after it."""
+        sys.stdout.write(("\n" if self.shown else "") + msg + "\n")
+        if self.line and not self.line.startswith("@"):
+            sys.stdout.write(self.line)
+            self.shown = len(self.line)
+        sys.stdout.flush()
+
     def write(self, part: str) -> None:
         if self.quiet:
             self.held += part
@@ -166,7 +174,7 @@ def colab(*args: str, check: bool = True, quiet: bool = False) -> tuple[int, str
     Sign-in and Drive permission links the CLI prints are opened in the browser;
     the user's typing (authorization code, Enter) goes straight to the CLI.
     """
-    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
+    env = {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
     proc = subprocess.Popen([*colab_cmd(), *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
     assert proc.stdout is not None
     decoder = codecs.getincrementaldecoder("utf-8")("replace")
@@ -181,8 +189,9 @@ def colab(*args: str, check: bool = True, quiet: bool = False) -> tuple[int, str
         for m in re.finditer(r"visit[^\n]*\n\s*(https://\S+)\s", text[-3000:], re.I):
             if m.group(1) not in opened:
                 opened.add(m.group(1))
-                say("\n👉 브라우저에서 위 주소를 열었어요. 허용한 뒤 이 창으로 돌아와 주세요.")
-                webbrowser.open(m.group(1))
+                echo.note("👉 브라우저에서 위 주소를 열었어요. 허용한 뒤 이 창으로 돌아와 주세요.")
+                if not os.environ.get("SUBRM_NO_OPEN"):
+                    webbrowser.open(m.group(1))
     rc = proc.wait()
     if check and rc != 0:
         raise Stop(f"Colab 명령이 실패했어요: colab {' '.join(args[:1])} (코드 {rc})")
@@ -199,7 +208,7 @@ def colab_exec_code(session: str, code: str, timeout: int = 600, quiet: bool = T
 
 
 def start_runtime(session: str, gpu: str = "T4") -> None:
-    say(f"\n▶ Colab {gpu} 런타임을 켜는 중... (1분 정도 걸려요)")
+    say(f"  Colab {gpu} 런타임을 켜는 중... (1분 정도 걸려요)")
     rc, out = colab("new", "-s", session, "--gpu", gpu, check=False)
     if rc != 0:
         hint = "무료 사용량이 다 찼거나 지금 GPU가 부족할 수 있어요" if gpu == "T4" else \
@@ -284,12 +293,12 @@ def ensure_token(ask: bool) -> Path:
         return path
     if saved:
         if check_token(saved) is not False:
-            say("\n🟢 저장된 GitHub 토큰을 그대로 써요.")
+            say("  🟢 저장된 토큰을 그대로 써요.")
             return path
-        say("\n⚠️ 저장된 GitHub 토큰이 만료됐거나 권한이 없어요. 새 토큰을 넣어 주세요.")
+        say("  ⚠️ 저장된 토큰이 만료됐거나 권한이 없어요. 새 토큰을 넣어 주세요.")
     elif not ask:
         raise Stop("GitHub 토큰이 없어요. 먼저 colab_setup.bat 을 실행해 주세요.")
-    say("\n▶ GitHub 토큰 (Colab이 비공개 저장소에서 코드를 받을 때 써요)")
+    say("  Colab이 비공개 저장소에서 코드를 받을 때 쓰는 열쇠예요.")
     say("  실행가이드.md 의 'GitHub 토큰 만들기'대로 만든 github_pat_... 토큰을 붙여 넣고 Enter (오른쪽 클릭 = 붙여넣기)")
     while True:
         token = input("  토큰: ").strip().strip('"')
@@ -310,19 +319,22 @@ def cmd_setup(args) -> None:
     say("=== 자막 지우개: Colab 자동 실행 준비 ===")
     if sys.version_info < (3, 12):
         raise Stop(f"Python 3.12 이상이 필요해요 (지금 {sys.version.split()[0]}). python.org에서 3.12를 설치해 주세요.")
+    say("\n▶ [1/5] Colab CLI 설치 중... (1~2분 걸려요)")
     if not os.environ.get("SUBRM_COLAB"):
-        say("\n▶ Colab CLI 설치 중...")
         py = VENV / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         if not py.exists():
             subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True)
         subprocess.run([str(py), "-m", "pip", "install", "-q", "--upgrade", "pip", "google-colab-cli"], check=True)
+    say("  ✅ 설치 완료")
 
+    say("\n▶ [2/5] GitHub 토큰")
     ensure_token(ask=True)
 
-    say("\n▶ 구글 계정 연결 (처음 한 번)")
-    say("  브라우저가 열리면 Colab을 쓸 구글 계정으로 로그인하고 허용하세요.")
-    say("  화면에 나온 인증 코드를 복사해서 이 창에 붙여 넣고 Enter 를 누르면 돼요.")
-    colab("sessions")
+    say("\n▶ [3/5] 구글 계정 연결")
+    say("  처음이면 브라우저가 열려요. Colab을 쓸 구글 계정으로 로그인하고 허용하세요.")
+    say("  그다음 화면에 나온 인증 코드를 복사해서 이 창에 붙여 넣고 Enter 를 누르면 돼요.")
+    colab("sessions", quiet=True)
+    say("  ✅ 구글 계정 연결 완료")
 
     settings = load_settings()
     root = find_drive_root(settings)
@@ -335,9 +347,13 @@ def cmd_setup(args) -> None:
 
     session = f"subrm-setup-{datetime.now():%Y%m%d%H%M%S}"
     try:
+        say("\n▶ [4/5] Colab GPU 시험 연결")
         start_runtime(session, settings.get("gpu", "T4"))
-        say("\n▶ Google Drive 연결 (처음 한 번은 브라우저에서 허용이 필요해요)")
+        say("  ✅ 런타임 연결 완료")
+        say("\n▶ [5/5] Google Drive 연결")
+        say("  처음이면 브라우저에 Drive 허용 화면이 열려요. 허용한 뒤 이 창으로 돌아와 Enter 를 누르세요.")
         colab("drivemount", "-s", session)
+        say("  ✅ Google Drive 연결 완료")
         out = colab_exec_code(session, "import os, subprocess\n"
                                        f"os.makedirs({json.dumps(VM_CONTENT + '/drive/MyDrive/subtitle-remover/input')}, exist_ok=True)\n"
                                        f"os.makedirs({json.dumps(VM_CONTENT + '/drive/MyDrive/subtitle-remover/output')}, exist_ok=True)\n"
@@ -348,8 +364,9 @@ def cmd_setup(args) -> None:
                                        "    gpu = ''\n"
                                        "print('@@GPU ' + (gpu or 'none'))\n")
         gpu = re.search(r"@@GPU (.*)", out)
-        say(f"\n  GPU: {gpu.group(1).strip() if gpu else '확인 못 함'}")
+        say(f"  GPU: {gpu.group(1).strip() if gpu else '확인 못 함'}")
     finally:
+        say("\n시험용 런타임을 끄는 중...")
         colab("stop", "-s", session, check=False, quiet=True)
     say("\n✅ 준비 완료! 이제 colab_run.bat 을 실행하면 돼요.")
 
@@ -408,6 +425,7 @@ def cmd_run(args) -> None:
     session = f"subrm-{datetime.now():%Y%m%d%H%M%S}"
     result, out = None, ""
     try:
+        say("\n▶ Colab GPU 런타임 켜기")
         start_runtime(session, settings.get("gpu", "T4"))
         say("\n▶ Google Drive 연결 중...")
         colab("drivemount", "-s", session)
@@ -497,6 +515,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except EOFError:
         say("\n❌ 입력을 받지 못했어요. 창에서 직접 실행해 주세요.")
+        return 1
+    except subprocess.CalledProcessError:
+        say("\n❌ 설치 중에 오류가 났어요. 인터넷 연결을 확인하고 다시 실행해 주세요. "
+            "계속 안 되면 위의 메시지를 보내 주세요.")
         return 1
     return 0
 

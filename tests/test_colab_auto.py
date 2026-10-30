@@ -160,3 +160,18 @@ def test_setup_asks_for_a_new_token_when_the_saved_one_is_rejected(env, monkeypa
     path = colab_auto.ensure_token(ask=True)
     assert path.read_text() == "github_pat_new"
     assert colab_auto.ensure_token(ask=False) == path
+
+
+def test_first_setup_walks_through_sign_in_and_drive_permission(env, tmp_path):
+    e = {**env["env"], "FAKE_COLAB_AUTH": "1"}
+    res = subprocess.run([sys.executable, str(ROOT / "tools" / "colab_auto.py"), "setup"], env=e,
+                         input="4/0AUTHCODE\n\n", capture_output=True, text=True, timeout=300)
+    out = res.stdout
+    assert res.returncode == 0, out + res.stderr
+    for step in ("[1/5]", "[2/5]", "[3/5]", "[4/5]", "[5/5]"):
+        assert step in out
+    assert out.count("👉 브라우저에서 위 주소를 열었어요") == 2  # Google sign-in, then Drive permission
+    assert "Enter the authorization code:" in out and "Press Enter after you have granted access" in out
+    assert "저장된 토큰을 그대로" in out and "✅ 구글 계정 연결 완료" in out and "✅ Google Drive 연결 완료" in out
+    # our hint comes before the CLI's prompt, which is repeated so the cursor sits right after it
+    assert out.index("👉") < out.rindex("Enter the authorization code:")

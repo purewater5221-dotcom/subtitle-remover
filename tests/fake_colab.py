@@ -49,6 +49,13 @@ def local(remote):  # "content/x/y" -> <fake /content>/x/y
 
 
 cmd = args[0]
+if os.environ.get("FAKE_COLAB_AUTH") and not (HOME / "token.json").exists():
+    print("\nTo authorize colab-cli, visit this URL in any browser:\n", file=sys.stderr)
+    print("  https://accounts.google.com/o/oauth2/auth?client_id=fake\n", file=sys.stderr)
+    print("After approving, Google will display an authorization code.", file=sys.stderr)
+    if not input("Enter the authorization code: ").strip():
+        sys.exit(1)
+    (HOME / "token.json").write_text("{}")
 if cmd == "sessions":
     print("\n".join(sessions()) or "[colab] No active sessions.")
     sys.exit(0)
@@ -68,6 +75,14 @@ if option("-s") not in sessions():
     print(f"[colab] Session '{option('-s')}' not found.")
     sys.exit(1)
 if cmd == "drivemount":
+    if os.environ.get("FAKE_COLAB_AUTH") and not (HOME / "drive_ok").exists():
+        print("\n[colab] Intercepted Drive Auth Request. Connecting to https://colab.research.google.com...")
+        print("\n[colab] REQUIRED: Google Drive Authorization needed.\nPlease visit:\n\nhttps://accounts.google.com/drive-consent\n")
+        sys.stdout.write("Press Enter after you have granted access... ")
+        sys.stdout.flush()
+        sys.stdin.readline()
+        print("[colab] Authorizing VM...\n[colab] Credentials propagated. Resuming mount...")
+        (HOME / "drive_ok").write_text("1")
     (CONTENT / "drive").mkdir(parents=True, exist_ok=True)
     link = CONTENT / "drive" / "MyDrive"
     if not link.exists():
