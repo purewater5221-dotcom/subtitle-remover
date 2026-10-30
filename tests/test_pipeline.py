@@ -28,6 +28,7 @@ def test_end_to_end_opencv(synthetic_clip, tmp_path):
     out = tmp_path / "out.mp4"
     r = SubtitleRemover(cfg).process(synthetic_clip / "clip.mp4", out)
     assert r.removed == 2 and r.jobs == 2
+    assert set(r.timings) == {"찾기", "메꾸기", "합치기"} and all(v >= 0 for v in r.timings.values())
     src_info, out_info = probe(synthetic_clip / "clip.mp4"), probe(out)
     assert (out_info.width, out_info.height, out_info.fps) == (src_info.width, src_info.height, src_info.fps)
     assert out_info.has_audio

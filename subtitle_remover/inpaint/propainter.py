@@ -156,7 +156,16 @@ class ProPainterInpainter:
             self._build(RAFT_bi, RecurrentFlowCompleteNet, InpaintGenerator, weights)
 
     def _build(self, RAFT_bi, RecurrentFlowCompleteNet, InpaintGenerator, weights: Path) -> None:
+        import torch
+
+        if self.device.type == "cuda":
+            # crop sizes repeat within a job, so cuDNN's autotuned kernels pay off
+            torch.backends.cudnn.benchmark = True
         self.raft = RAFT_bi(str(weights / "raft-things.pth"), self.device)
+        raft_model = getattr(self.raft, "fix_raft", None)
+        if self.half and hasattr(raft_model, "args"):
+            # RAFT's own mixed-precision mode: encoders and update block in fp16, correlation stays fp32
+            raft_model.args.mixed_precision = True
         self.flow_complete = RecurrentFlowCompleteNet(str(weights / "recurrent_flow_completion.pth"))
         for p in self.flow_complete.parameters():
             p.requires_grad = False

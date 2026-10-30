@@ -42,7 +42,7 @@ VM_CONTENT = os.environ.get("SUBRM_VM_CONTENT", "/content")  # tests point this 
 CHUNK = int(os.environ.get("SUBRM_CHUNK", 16 * 1024 * 1024))  # per upload/download request
 EXEC_TIMEOUT = 8 * 3600
 DEFAULT_SETTINGS = {"quality": "보통", "region": "전체 화면", "custom_region": "", "target": "overlay",
-                    "method": "propainter", "drive_root": ""}
+                    "method": "propainter", "gpu": "T4", "drive_root": ""}
 
 
 class Stop(Exception):
@@ -198,12 +198,13 @@ def colab_exec_code(session: str, code: str, timeout: int = 600, quiet: bool = T
         os.unlink(f.name)
 
 
-def start_runtime(session: str) -> None:
-    say("\n▶ Colab T4 런타임을 켜는 중... (1분 정도 걸려요)")
-    rc, out = colab("new", "-s", session, "--gpu", "T4", check=False)
+def start_runtime(session: str, gpu: str = "T4") -> None:
+    say(f"\n▶ Colab {gpu} 런타임을 켜는 중... (1분 정도 걸려요)")
+    rc, out = colab("new", "-s", session, "--gpu", gpu, check=False)
     if rc != 0:
-        raise Stop("T4 GPU 런타임을 받지 못했어요. 무료 사용량이 다 찼거나 지금 GPU가 부족할 수 있어요. "
-                   "잠시 뒤 다시 실행해 주세요.")
+        hint = "무료 사용량이 다 찼거나 지금 GPU가 부족할 수 있어요" if gpu == "T4" else \
+            f"{gpu}는 Colab Pro 이상에서만 쓸 수 있어요. colab.json의 gpu를 T4로 바꾸거나"
+        raise Stop(f"{gpu} GPU 런타임을 받지 못했어요. {hint}. 잠시 뒤 다시 실행해 주세요.")
 
 
 def vm_path(remote: str) -> str:
@@ -320,7 +321,7 @@ def cmd_setup(args) -> None:
 
     session = f"subrm-setup-{datetime.now():%Y%m%d%H%M%S}"
     try:
-        start_runtime(session)
+        start_runtime(session, settings.get("gpu", "T4"))
         say("\n▶ Google Drive 연결 (처음 한 번은 브라우저에서 허용이 필요해요)")
         colab("drivemount", "-s", session)
         out = colab_exec_code(session, "import os, subprocess\n"
@@ -393,7 +394,7 @@ def cmd_run(args) -> None:
     session = f"subrm-{datetime.now():%Y%m%d%H%M%S}"
     result = None
     try:
-        start_runtime(session)
+        start_runtime(session, settings.get("gpu", "T4"))
         say("\n▶ Google Drive 연결 중...")
         colab("drivemount", "-s", session)
         colab("upload", "-s", session, str(token), "content/.gh_token", quiet=True)

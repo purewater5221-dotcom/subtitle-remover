@@ -69,7 +69,7 @@ class InpaintConfig:
 @dataclass
 class OutputConfig:
     crf: int = 17
-    preset: str = "medium"
+    preset: str = "fast"  # x264 speed; at a fixed crf this mostly changes the file size
     debug: bool = False  # also write a mask preview video and tracks.json
 
 
@@ -117,7 +117,9 @@ def parse_region(text: str) -> list[Region]:
 def apply_quality(cfg: Config, quality: str) -> Config:
     ip = cfg.inpaint
     if quality == "fast":
-        ip.max_pixels, ip.raft_iter, ip.chunk_frames = 250_000, 12, 100
+        # about half the work of "balanced": a smaller crop (softer fill), fewer flow
+        # iterations and fewer reference frames
+        ip.max_pixels, ip.raft_iter, ip.chunk_frames, ip.ref_stride = 100_000, 10, 100, 20
         cfg.detect.every = 2
     elif quality == "balanced":
         pass

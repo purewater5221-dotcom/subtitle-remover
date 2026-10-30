@@ -19,3 +19,11 @@ def test_opencv_method_is_untouched():
     cfg = Config()
     cfg.inpaint.method = "opencv"
     assert fit_to_gpu(cfg, ("tiny", 2.0)) == "" and cfg.inpaint.max_pixels == Config().inpaint.max_pixels
+
+
+def test_fast_preset_does_about_half_the_work():
+    fast, balanced = apply_quality(Config(), "fast"), Config()
+    assert fast.inpaint.max_pixels < balanced.inpaint.max_pixels / 2
+    assert fast.inpaint.raft_iter < balanced.inpaint.raft_iter
+    assert fast.inpaint.ref_stride > balanced.inpaint.ref_stride
+    assert fast.detect.every == 2

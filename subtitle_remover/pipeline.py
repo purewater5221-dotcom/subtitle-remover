@@ -15,7 +15,7 @@ import math
 import shutil
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -45,6 +45,7 @@ class VideoResult:
     jobs: int
     seconds: float
     note: str = ""
+    timings: dict = field(default_factory=dict)  # seconds per stage
 
 
 @dataclass
@@ -193,6 +194,7 @@ class SubtitleRemover:
         input_path, output_path = Path(input_path), Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         a = self.analyze(input_path)
+        timings = {"찾기": time.time() - t0}
         kept = sum(t.keep for t in a.tracks)
         log.info("%s: %d프레임, 텍스트 %d개 중 %d개 제거 대상, 장면 %d개, 처리 구간 %d개",
                  input_path.name, a.n_frames, len(a.tracks), kept, len(a.scenes), len(a.jobs))
@@ -216,14 +218,19 @@ class SubtitleRemover:
         work = work_root / f"{input_path.stem}_{key[:10]}"
         work.mkdir(parents=True, exist_ok=True)
         try:
+            t = time.time()
             self._extract(a, work)
             self._inpaint_jobs(a, work)
+            timings["메꾸기"] = time.time() - t
+            t = time.time()
             self._composite(a, work, output_path, preview if cfg.output.debug else None)
+            timings["합치기"] = time.time() - t
         finally:
             if not cfg.keep_work:
                 shutil.rmtree(work, ignore_errors=True)
+        log.info("⏱ %s", " · ".join(f"{k} {v:.0f}초" for k, v in timings.items()))
         return VideoResult(input_path, output_path, preview if cfg.output.debug else None, a.n_frames,
-                           len(a.tracks), kept, len(a.jobs), time.time() - t0)
+                           len(a.tracks), kept, len(a.jobs), time.time() - t0, timings=timings)
 
     # ------------------------------------------------------------------ pass 2
     def _extract(self, a: Analysis, work: Path) -> None:
