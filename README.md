@@ -38,7 +38,7 @@
 1. GitHub에 로그인 → 오른쪽 위 프로필 사진 → **Settings**
 2. 왼쪽 메뉴 맨 아래 **Developer settings** → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**
 3. 다음처럼 입력해요.
-   - Token name: 아무 이름이나 괜찮아요 (예: `subtitle-remover`). 이미 있는 이름은 쓸 수 없어요.
+   - Token name: `subtitle-remover` (목록에서 알아보기 위한 이름표예요. 이미 있는 이름이면 다른 이름으로)
    - Expiration: 원하는 기간 (만료되면 새로 만들어서 3)번처럼 다시 저장하면 돼요)
    - Repository access: **Only select repositories** → `subtitle-remover`
    - Permissions → Repository permissions → **Contents: Read-only**
@@ -53,7 +53,7 @@
 
 **3) 토큰 저장**
 
-노트북 왼쪽의 🔑(보안 비밀) → **새 보안 비밀 추가**를 눌러요. 이름은 `GITHUB_TOKEN`, 값에는 복사한 토큰을 붙여 넣고, **노트북 액세스**를 켜요.
+노트북 왼쪽의 🔑(보안 비밀) → **새 보안 비밀 추가**를 눌러요. 이름은 `GITHUB_TOKEN`(토큰 이름 `subtitle-remover`가 아니라 꼭 이대로), 값에는 복사한 토큰을 붙여 넣고, **노트북 액세스**를 켜요.
 
 **4) GPU 켜기**
 
