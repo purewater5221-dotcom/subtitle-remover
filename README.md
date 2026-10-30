@@ -2,6 +2,8 @@
 
 샤오홍슈·더우인·인스타그램·틱톡 같은 짧은 영상에 박혀 있는 자막을 찾아서, 그 자리를 **배경으로 자연스럽게 메꿔 주는** 개인용 프로그램입니다. 블러나 모자이크로 가리는 게 아니라, 자막이 처음부터 없던 영상처럼 만드는 게 목표예요.
 
+> 👉 **처음 실행한다면 [실행가이드.md](실행가이드.md)를 보세요.** 준비부터 결과 확인, 문제 해결까지 단계별로 자세히 적어 두었어요.
+
 ## 어떻게 동작하나요
 
 1. **자막 찾기**: PP-OCRv6 텍스트 검출 모델로 프레임마다 글자 위치를 찾고, 시간 흐름에 따라 추적해요.
@@ -239,6 +241,7 @@ colab/             Colab 노트북 (tools/build_notebook.py로 생성)
 tools/             설치, Colab 자동 실행(colab_auto.py), 합성 테스트 영상, 품질 측정, 노트북 생성
 tests/             자동 테스트 (pytest)
 samples/           테스트용 영상을 올리는 곳
+실행가이드.md       처음 실행할 때 보는 단계별 안내
 install_windows.bat, run_windows.bat, install.sh, run.sh     내 컴퓨터용 (B)
 colab_setup.bat, colab_run.bat, colab_stop.bat             Colab 자동 실행용 (C)
 ```

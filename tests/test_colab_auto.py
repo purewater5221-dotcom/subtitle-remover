@@ -30,7 +30,7 @@ def env(tmp_path, synthetic_clip):
     drive.mkdir()
     e = {**os.environ, "HOME": str(home), "SUBRM_COLAB": str(ROOT / "tests" / "fake_colab.py"),
          "SUBRM_VM_CONTENT": str(tmp_path / "vm" / "content"), "FAKE_COLAB_HOME": str(tmp_path / "colab"),
-         "FAKE_COLAB_DRIVE": str(drive), "SUBRM_NO_OPEN": "1",
+         "FAKE_COLAB_DRIVE": str(drive), "SUBRM_NO_OPEN": "1", "SUBRM_SKIP_TOKEN_CHECK": "1",
          "SUBRM_JOB_EXTRA": json.dumps({"code_dir": str(ROOT), "skip_install": True, "flush_drive": False})}
     return {"env": e, "videos": videos, "drive": drive, "vm": tmp_path / "vm" / "content", "colab": tmp_path / "colab"}
 
@@ -147,3 +147,16 @@ def test_setup_checks_runtime_and_drive(env):
     assert (env["drive"] / "subtitle-remover" / "input").is_dir()
     calls = (env["colab"] / "calls.log").read_text().splitlines()
     assert calls[0] == "sessions" and calls[1].startswith("new -s subrm-setup-") and calls[-1].startswith("stop")
+
+
+def test_setup_asks_for_a_new_token_when_the_saved_one_is_rejected(env, monkeypatch):
+    sys.path.insert(0, str(ROOT / "tools"))
+    import colab_auto
+
+    monkeypatch.setenv("HOME", env["env"]["HOME"])
+    monkeypatch.delenv("SUBRM_SKIP_TOKEN_CHECK", raising=False)
+    monkeypatch.setattr(colab_auto, "check_token", lambda t: t == "github_pat_new")
+    monkeypatch.setattr("builtins.input", lambda prompt="": "github_pat_new")
+    path = colab_auto.ensure_token(ask=True)
+    assert path.read_text() == "github_pat_new"
+    assert colab_auto.ensure_token(ask=False) == path

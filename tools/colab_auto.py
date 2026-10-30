@@ -262,7 +262,10 @@ def download_file(session: str, remote: str, local: Path) -> None:
 
 
 # ---------------------------------------------------------------- GitHub token
-def check_token(token: str) -> bool:
+def check_token(token: str) -> bool | None:
+    """True/False: the token can/cannot read the repository. None: could not check (offline)."""
+    if os.environ.get("SUBRM_SKIP_TOKEN_CHECK"):  # tests
+        return True
     req = urllib.request.Request(f"https://api.github.com/repos/{REPO}",
                                  headers={"Authorization": f"Bearer {token}", "User-Agent": "subtitle-remover"})
     try:
@@ -270,19 +273,30 @@ def check_token(token: str) -> bool:
             return resp.status == 200
     except urllib.error.HTTPError:
         return False
+    except OSError:
+        return None
 
 
 def ensure_token(ask: bool) -> Path:
     path = token_path()
-    if path.exists() and path.read_text().strip():
+    saved = path.read_text().strip() if path.exists() else ""
+    if saved and not ask:
         return path
-    if not ask:
+    if saved:
+        if check_token(saved) is not False:
+            say("\n🟢 저장된 GitHub 토큰을 그대로 써요.")
+            return path
+        say("\n⚠️ 저장된 GitHub 토큰이 만료됐거나 권한이 없어요. 새 토큰을 넣어 주세요.")
+    elif not ask:
         raise Stop("GitHub 토큰이 없어요. 먼저 colab_setup.bat 을 실행해 주세요.")
     say("\n▶ GitHub 토큰 (Colab이 비공개 저장소에서 코드를 받을 때 써요)")
-    say("  README의 'GitHub 토큰 만들기'대로 만든 github_pat_... 토큰을 붙여 넣고 Enter (오른쪽 클릭 = 붙여넣기)")
+    say("  실행가이드.md 의 'GitHub 토큰 만들기'대로 만든 github_pat_... 토큰을 붙여 넣고 Enter (오른쪽 클릭 = 붙여넣기)")
     while True:
         token = input("  토큰: ").strip().strip('"')
-        if token and check_token(token):
+        ok = check_token(token) if token else False
+        if ok is None:
+            say("  (인터넷 연결 문제로 토큰을 확인하지 못했어요. 일단 저장할게요.)")
+        if ok is not False:
             break
         say("  ⚠️ 이 토큰으로는 저장소에 접근할 수 없어요. 토큰과 저장소 권한(Contents: Read-only)을 확인해 주세요.")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -392,7 +406,7 @@ def cmd_run(args) -> None:
         uploaded_dir = f"{VM_CONTENT}/upload/{name}"
 
     session = f"subrm-{datetime.now():%Y%m%d%H%M%S}"
-    result = None
+    result, out = None, ""
     try:
         start_runtime(session, settings.get("gpu", "T4"))
         say("\n▶ Google Drive 연결 중...")
@@ -434,6 +448,9 @@ def cmd_run(args) -> None:
         colab("stop", "-s", session, check=False, quiet=True)
 
     if not result:
+        if re.search(r"Authentication failed|could not read Username|Repository not found", out):
+            raise Stop("GitHub에서 코드를 받지 못했어요. 토큰이 만료됐을 수 있어요. colab_setup.bat 을 다시 실행해서 "
+                       "새 토큰을 넣어 주세요. 올린 영상은 Drive에 남아 있어서 다음 실행 때 이어서 처리돼요.")
         raise Stop("처리 결과를 확인하지 못했어요. 위의 메시지를 확인해 주세요. 올린 영상은 Drive에 남아 있어서 "
                    "다음 실행 때 이어서 처리돼요.")
     say("\n✅ 끝!")
@@ -477,6 +494,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except KeyboardInterrupt:
         say("\n중단했어요. Colab 런타임이 남아 있으면 colab_stop.bat 으로 끌 수 있어요.")
+        return 1
+    except EOFError:
+        say("\n❌ 입력을 받지 못했어요. 창에서 직접 실행해 주세요.")
         return 1
     return 0
 

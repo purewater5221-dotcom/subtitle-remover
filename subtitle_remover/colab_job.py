@@ -104,9 +104,13 @@ def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False) -> di
     write_json(out_dir / STATUS_FILE, status)
     print(f"\n=== 작업 {name}: 영상 {len(files)}개 ===", flush=True)
 
-    def report_wait():
-        left = missing_files(job_dir, files)
-        print(f"  Drive에 영상이 다 올라오기를 기다리는 중... (남은 파일 {len(left)}개)", flush=True)
+    last_report = [0.0]
+
+    def report_wait():  # at most once a minute
+        if time.monotonic() - last_report[0] >= 60:
+            last_report[0] = time.monotonic()
+            left = missing_files(job_dir, files)
+            print(f"  Drive에 영상이 다 올라오기를 기다리는 중... (남은 파일 {len(left)}개)", flush=True)
 
     wait_until(lambda: not missing_files(job_dir, files), WAIT_FILES_SEC, report_wait)
     missing = missing_files(job_dir, files)
