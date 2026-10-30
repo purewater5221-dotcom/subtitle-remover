@@ -16,7 +16,7 @@ def test_run_jobs_processes_folder_and_makes_comparison(synthetic_clip, tmp_path
     video, text = steps[-1]
     assert (out / "clip_clean.mp4").exists()
     assert video and video.endswith("clip_compare.mp4")
-    assert "끝!" in text and "✅" in text
+    assert "끝!" in text and "✅" in text and "⏱ 걸린 시간" in text
     logs = list((out / "logs").glob("*.txt"))
     assert len(logs) == 1 and "✅" in logs[0].read_text(encoding="utf-8")
     # second run skips the finished video

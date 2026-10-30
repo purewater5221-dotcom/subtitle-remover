@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from .config import QUALITY_PRESETS, REGION_PRESETS, Config, apply_quality, parse_region
+from .logs import TimeReport, format_seconds
 from .video_io import list_videos
 
 
@@ -95,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     from .pipeline import SubtitleRemover
 
     remover = SubtitleRemover(cfg)
-    failed = 0
+    failed, times = 0, TimeReport()
     for i, src in enumerate(videos, 1):
         dst = output_path_for(src, args.output, len(videos) > 1 or Path(args.inputs[0]).is_dir())
         if not args.detect_only and dst.exists() and not args.overwrite:
@@ -107,9 +108,13 @@ def main(argv: list[str] | None = None) -> int:
         except Exception as e:  # noqa: BLE001 - keep going with the next video
             failed += 1
             log.exception("[%d/%d] %s 실패: %s", i, len(videos), src.name, e)
+            times.add(src.name)
             continue
         done = r.output or r.preview
-        log.info("[%d/%d] 완료 (%.0f초): %s%s", i, len(videos), r.seconds, done, f" - {r.note}" if r.note else "")
+        times.add(src.name, r)
+        log.info("[%d/%d] 완료 (%s): %s%s", i, len(videos), format_seconds(r.seconds), done,
+                 f" - {r.note}" if r.note else "")
+    times.log()
     return 1 if failed else 0
 
 

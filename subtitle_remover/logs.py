@@ -1,4 +1,4 @@
-"""Keep a copy of a run's messages in a text file next to its results."""
+"""Keep a copy of a run's messages in a text file next to its results, and sum up the times."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import subprocess
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .device import gpu_info
@@ -30,6 +31,48 @@ class _AppendHandler(logging.Handler):
                 f.write(self.format(record) + "\n")
         except Exception:  # noqa: BLE001 - a log file must never stop a run
             self.handleError(record)
+
+
+def format_seconds(sec: float) -> str:
+    """45초, 4분 12초, 1시간 2분 3초"""
+    s = round(sec)
+    text = " ".join(f"{n}{unit}" for n, unit in ((s // 3600, "시간"), (s // 60 % 60, "분"), (s % 60, "초")) if n)
+    return text or "0초"
+
+
+class TimeReport:
+    """How long each video took, listed at the end of a run."""
+
+    def __init__(self):
+        self.rows: list[tuple[str, Any]] = []  # (file name, VideoResult or None if it failed)
+
+    def add(self, name: str, result: Any = None) -> None:
+        self.rows.append((name, result))
+
+    @property
+    def seconds(self) -> float:
+        return sum(r.seconds for _, r in self.rows if r is not None)
+
+    def lines(self) -> list[str]:
+        out = []
+        for name, r in self.rows:
+            if r is None:
+                out.append(f"  {name}: ❌ 실패")
+                continue
+            stages = " · ".join(f"{k} {format_seconds(v)}" for k, v in r.timings.items())
+            out.append(f"  {name} ({r.size[0]}×{r.size[1]}, {format_seconds(r.duration)} 영상) → "
+                       f"{format_seconds(r.seconds)}" + (f" ({stages})" if stages else ""))
+        done = [r for _, r in self.rows if r is not None]
+        if len(done) > 1:
+            out.append(f"  자막 지우기 합계: {format_seconds(self.seconds)} "
+                       f"(영상 {len(done)}개, 모두 {format_seconds(sum(r.duration for r in done))} 분량)")
+        return out
+
+    def log(self) -> None:
+        if self.rows:
+            log.info("⏱ 걸린 시간")
+            for line in self.lines():
+                log.info(line)
 
 
 def code_version() -> str:

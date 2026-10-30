@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import config_from_choices
-from .logs import log_to_file
+from .logs import TimeReport, format_seconds, log_to_file
 from .video_io import VIDEO_EXTS
 
 log = logging.getLogger("subtitle_remover")
@@ -160,7 +160,7 @@ def _run_job(base: Path, name: str, work: Path, keep_outputs: bool) -> dict:
                               s.get("custom_region", ""), s.get("method", "propainter"))
     cfg.work_dir = str(work / "cache")
     remover = SubtitleRemover(cfg)
-    results = []
+    results, times = [], TimeReport()
     todo = [f for f in files if f["name"] not in missing]
     for i, f in enumerate(todo, 1):
         status.update(done=i - 1, current=f["name"], state="processing", updated=now())
@@ -176,10 +176,13 @@ def _run_job(base: Path, name: str, work: Path, keep_outputs: bool) -> dict:
             shutil.copyfile(local_out, out_dir / local_out.name)
             results.append({"file": f["name"], "output": local_out.name, "removed": r.removed,
                             "seconds": round(r.seconds, 1), "note": r.note})
-            log.info("  ✅ %.0f초, 지운 글자 %d개 → output/%s/%s", r.seconds, r.removed, name, local_out.name)
+            times.add(f["name"], r)
+            log.info("  ✅ %s, 지운 글자 %d개 → output/%s/%s", format_seconds(r.seconds), r.removed, name,
+                     local_out.name)
         except Exception as e:  # noqa: BLE001 - keep going with the next video
             log.exception("  ❌ %s 실패", f["name"])
             results.append({"file": f["name"], "error": str(e)})
+            times.add(f["name"])
         finally:
             local_in.unlink(missing_ok=True)
             if not keep_outputs:  # kept when the results are downloaded from the runtime afterwards
@@ -187,7 +190,10 @@ def _run_job(base: Path, name: str, work: Path, keep_outputs: bool) -> dict:
 
     status.update(done=len(todo), current=None, state="finished", updated=now())
     write_json(out_dir / STATUS_FILE, status)
-    done = {"job": name, "finished": now(), "results": results, "missing": missing}
+    print(flush=True)
+    times.log()
+    done = {"job": name, "finished": now(), "results": results, "missing": missing,
+            "seconds": round(times.seconds, 1)}
     write_json(out_dir / DONE_FILE, done)
     return done
 
@@ -220,7 +226,7 @@ def main(base: str | Path = DEFAULT_BASE, job: str | None = None, uploaded_dir: 
         print("처리할 작업이 없어요.", flush=True)
     results = [run_job(base, n, work, keep_outputs) for n in names]
     summary = {"jobs": [{"name": d["job"], "outputs": [r["output"] for r in d["results"] if "output" in r],
-                         "errors": [r["file"] for r in d["results"] if "error" in r], "log": LOG_FILE}
-                        for d in results]}
+                         "errors": [r["file"] for r in d["results"] if "error" in r], "log": LOG_FILE,
+                         "seconds": d["seconds"]} for d in results]}
     print("@@RESULT " + json.dumps(summary, ensure_ascii=False), flush=True)
     return results

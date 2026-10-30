@@ -53,6 +53,13 @@ def say(msg: str = "") -> None:
     print(msg, flush=True)
 
 
+def format_seconds(sec: float) -> str:
+    """45초, 4분 12초, 1시간 2분 3초 (same as subtitle_remover.logs, which this script does not import)"""
+    s = round(sec)
+    text = " ".join(f"{n}{unit}" for n, unit in ((s // 3600, "시간"), (s // 60 % 60, "분"), (s % 60, "초")) if n)
+    return text or "0초"
+
+
 # ---------------------------------------------------------------- local config
 def config_dir() -> Path:
     if os.name == "nt":
@@ -399,6 +406,7 @@ def cmd_run(args) -> None:
         raise Stop(f"{folder} 에 영상 파일이 없어요 ({', '.join(sorted(VIDEO_EXTS))}).")
     total_mb = sum(v.stat().st_size for v in videos) / 1e6
     say(f"\n영상 {len(videos)}개 ({total_mb:.0f}MB)")
+    started = time.monotonic()
 
     job_settings = {k: settings[k] for k in ("quality", "region", "custom_region", "target", "method")}
     name = datetime.now().strftime("%Y%m%d%H")
@@ -483,9 +491,16 @@ def cmd_run(args) -> None:
             if (out_dir / "_done.json").exists():
                 break
             time.sleep(5)
-        open_folder(out_dir if out_dir.exists() else drive_root / "subtitle-remover" / "output")
+        results_dir = out_dir if out_dir.exists() else drive_root / "subtitle-remover" / "output"
     else:
-        open_folder(folder / "subtitle-remover-output")
+        results_dir = folder / "subtitle-remover-output"
+    # each video's time was listed by the runtime above; add the time around it
+    total = time.monotonic() - started
+    work = sum(j.get("seconds", 0) for j in result["jobs"])
+    detail = (f" (자막 지우기 {format_seconds(work)} + Colab 준비·업로드·결과 받기 {format_seconds(total - work)})"
+              if 0 < work <= total else "")
+    say(f"\n⏱ 전체 걸린 시간: {format_seconds(total)}{detail}")
+    open_folder(results_dir)
 
 
 def cmd_stop(args) -> None:

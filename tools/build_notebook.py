@@ -111,7 +111,7 @@ import logging, shutil, sys
 from datetime import datetime
 from pathlib import Path
 from subtitle_remover import Config, apply_quality, parse_region
-from subtitle_remover.logs import log_to_file
+from subtitle_remover.logs import TimeReport, format_seconds, log_to_file
 from subtitle_remover.pipeline import SubtitleRemover
 from subtitle_remover.video_io import list_videos
 
@@ -132,7 +132,7 @@ in_dir, out_dir, local_out = Path(INPUT_DIR), Path(OUTPUT_DIR), Path("/content/o
 out_dir.mkdir(parents=True, exist_ok=True)
 local_out.mkdir(parents=True, exist_ok=True)
 videos = [v for v in list_videos(in_dir) if not v.stem.endswith(("_clean", "_mask"))] if in_dir.exists() else []
-results = []
+results, times = [], TimeReport()
 if not videos:
     raise SystemExit(f"⚠️ {in_dir} 에 영상이 없습니다. Drive에 영상을 올린 뒤 다시 실행하세요.")
 
@@ -152,6 +152,7 @@ with log_to_file(log_path):
             r = remover.process(src, local_out / final.name, detect_only=detect_only)
         except Exception as e:
             log.exception("❌ 실패: %s", e)
+            times.add(src.name)
             continue
         for name in (final.name, f"{src.stem}_clean_mask.mp4", f"{src.stem}_clean_tracks.json"):
             f = local_out / name  # result, mask preview, detection report
@@ -160,7 +161,11 @@ with log_to_file(log_path):
                 f.unlink()
         done = out_dir / (r.output or r.preview).name
         results.append((src, done))
-        log.info("✅ %.0f초, 지운 글자 %d개 → %s%s", r.seconds, r.removed, done, f" ({r.note})" if r.note else "")
+        times.add(src.name, r)
+        log.info("✅ %s, 지운 글자 %d개 → %s%s", format_seconds(r.seconds), r.removed, done,
+                 f" ({r.note})" if r.note else "")
+    print()
+    times.log()
 print(f"\\n끝! ④ 로 결과를 비교해 보세요. 처리 기록: {log_path}")
 '''
 

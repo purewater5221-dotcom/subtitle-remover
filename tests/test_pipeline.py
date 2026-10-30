@@ -1,4 +1,5 @@
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -29,6 +30,7 @@ def test_end_to_end_opencv(synthetic_clip, tmp_path):
     r = SubtitleRemover(cfg).process(synthetic_clip / "clip.mp4", out)
     assert r.removed == 2 and r.jobs == 2
     assert set(r.timings) == {"찾기", "메꾸기", "합치기"} and all(v >= 0 for v in r.timings.values())
+    assert r.size == (180, 320) and abs(r.duration - 2) < 0.1
     src_info, out_info = probe(synthetic_clip / "clip.mp4"), probe(out)
     assert (out_info.width, out_info.height, out_info.fps) == (src_info.width, src_info.height, src_info.fps)
     assert out_info.has_audio
@@ -38,3 +40,11 @@ def test_end_to_end_opencv(synthetic_clip, tmp_path):
     assert after["psnr_text_area"] > before["psnr_text_area"] + 5
     assert after["psnr_elsewhere"] > 35
 
+
+
+def test_cli_lists_the_time_each_video_took(synthetic_clip, tmp_path, caplog):
+    from subtitle_remover import cli
+
+    caplog.set_level(logging.INFO, logger="subtitle_remover")
+    assert cli.main([str(synthetic_clip / "clip.mp4"), "-o", str(tmp_path / "out.mp4"), "--method", "opencv"]) == 0
+    assert "⏱ 걸린 시간" in caplog.text and "clip.mp4 (180×320, 2초 영상) → " in caplog.text

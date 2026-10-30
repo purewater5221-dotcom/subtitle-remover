@@ -25,6 +25,7 @@ from tqdm.auto import tqdm
 from .config import Config
 from .detect import TextBox, TextDetector
 from .device import fit_to_gpu
+from .logs import format_seconds
 from .masks import feather, rasterize
 from .planner import Job, plan_jobs
 from .scenes import SceneDetector
@@ -46,6 +47,8 @@ class VideoResult:
     seconds: float
     note: str = ""
     timings: dict = field(default_factory=dict)  # seconds per stage
+    duration: float = 0.0  # length of the video in seconds
+    size: tuple[int, int] = (0, 0)
 
 
 @dataclass
@@ -195,6 +198,7 @@ class SubtitleRemover:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         a = self.analyze(input_path)
         timings = {"찾기": time.time() - t0}
+        video = {"duration": a.n_frames / float(a.info.fps), "size": (a.info.width, a.info.height)}
         kept = sum(t.keep for t in a.tracks)
         log.info("%s: %d프레임, 텍스트 %d개 중 %d개 제거 대상, 장면 %d개, 처리 구간 %d개",
                  input_path.name, a.n_frames, len(a.tracks), kept, len(a.scenes), len(a.jobs))
@@ -205,11 +209,11 @@ class SubtitleRemover:
         if detect_only:
             self._write_preview(a, preview)
             return VideoResult(input_path, None, preview, a.n_frames, len(a.tracks), kept, len(a.jobs),
-                               time.time() - t0, "마스크 미리보기만 만들었습니다")
+                               time.time() - t0, "마스크 미리보기만 만들었습니다", timings, **video)
         if not a.jobs:
             copy_as_mp4(input_path, output_path)
             return VideoResult(input_path, output_path, None, a.n_frames, len(a.tracks), 0, 0,
-                               time.time() - t0, "지울 자막을 찾지 못해 원본을 그대로 복사했습니다")
+                               time.time() - t0, "지울 자막을 찾지 못해 원본을 그대로 복사했습니다", timings, **video)
 
         work_root = Path(cfg.work_dir) if cfg.work_dir else Path(tempfile.gettempdir()) / "subtitle_remover"
         st = input_path.stat()
@@ -228,9 +232,9 @@ class SubtitleRemover:
         finally:
             if not cfg.keep_work:
                 shutil.rmtree(work, ignore_errors=True)
-        log.info("⏱ %s", " · ".join(f"{k} {v:.0f}초" for k, v in timings.items()))
+        log.info("⏱ %s", " · ".join(f"{k} {format_seconds(v)}" for k, v in timings.items()))
         return VideoResult(input_path, output_path, preview if cfg.output.debug else None, a.n_frames,
-                           len(a.tracks), kept, len(a.jobs), time.time() - t0, timings=timings)
+                           len(a.tracks), kept, len(a.jobs), time.time() - t0, timings=timings, **video)
 
     # ------------------------------------------------------------------ pass 2
     def _extract(self, a: Analysis, work: Path) -> None:

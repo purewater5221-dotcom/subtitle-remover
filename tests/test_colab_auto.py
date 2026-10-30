@@ -54,6 +54,8 @@ def test_run_with_drive_app(env):
     assert done["results"][0]["output"] == "clip one_clean.mp4" and done["missing"] == []
     log = (out / "_log.txt").read_text(encoding="utf-8")
     assert "[1/1] clip one.mp4" in log and "⏱" in log and "✅" in log
+    assert "⏱ 걸린 시간\n  clip one.mp4 (180×320, 2초 영상) → " in res.stdout
+    assert res.stdout.strip().splitlines()[-1].startswith("⏱ 전체 걸린 시간: ")  # the very last line
     assert not (env["vm"] / ".gh_token").exists()  # token removed from the runtime after use
     calls = (env["colab"] / "calls.log").read_text()
     assert "new -s subrm-" in calls and "--gpu T4" in calls and calls.strip().splitlines()[-1].startswith("stop")
@@ -140,7 +142,8 @@ def test_colab_job_skips_files_that_never_arrive(tmp_path, monkeypatch, syntheti
     assert done["missing"] == ["b.mp4"] and done["results"][0]["output"] == "a_clean.mp4"
     assert (base / "output" / "2026010112" / "a_clean.mp4").exists()
     log = (base / "output" / "2026010112" / "_log.txt").read_text(encoding="utf-8")
-    assert "b.mp4" in log and "[1/1] a.mp4" in log and "⏱" in log
+    assert "b.mp4" in log and "[1/1] a.mp4" in log and "⏱ 걸린 시간" in log
+    assert "  a.mp4 (180×320, 2초 영상) → " in log and done["seconds"] > 0
     assert colab_job.pending_jobs(base) == []
     assert colab_job.unique_job_name(base, "2026010112") == "2026010112_2"
 
