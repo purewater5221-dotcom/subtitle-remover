@@ -140,6 +140,20 @@ def test_colab_job_skips_files_that_never_arrive(tmp_path, monkeypatch, syntheti
     assert colab_job.unique_job_name(base, "2026010112") == "2026010112_2"
 
 
+def test_colab_job_installs_only_missing_packages(monkeypatch):
+    import importlib.util
+
+    from subtitle_remover import colab_job
+
+    real = importlib.util.find_spec
+    missing = {"rapidocr", "onnx", "onnx2torch"}  # e.g. an older bootstrap installed only the rest
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name in missing else real(name, *a))
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd[3:]) or subprocess.CompletedProcess(cmd, 0))
+    colab_job.install_packages()
+    assert calls == [["install", "-q", "--no-deps", "rapidocr==3.10.0"], ["install", "-q", "onnx", "onnx2torch"]]
+
+
 def test_setup_checks_runtime_and_drive(env):
     res = run(env["env"], "setup")
     assert res.returncode == 0, res.stdout + res.stderr

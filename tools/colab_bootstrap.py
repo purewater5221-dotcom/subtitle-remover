@@ -37,27 +37,20 @@ def fetch_code():
           flush=True)
 
 
-def install():
-    if JOB.get("skip_install"):
-        return
-    print("installing packages...", flush=True)
-    sh(sys.executable, "-m", "pip", "install", "-q", "--no-deps", "rapidocr==3.10.0")
-    sh(sys.executable, "-m", "pip", "install", "-q", "onnxruntime", "onnx", "onnx2torch", "einops")
-
-
 fetch_code()
-install()
 if str(REPO_DIR) not in sys.path:
     sys.path.insert(0, str(REPO_DIR))
 from subtitle_remover import colab_job  # noqa: E402
 
 if not JOB.get("skip_install"):
+    colab_job.install_packages()  # the package list comes with the code from GitHub
     from subtitle_remover.inpaint.propainter import ensure_propainter
 
     ensure_propainter()
 try:
     colab_job.main(base=JOB["drive_base"], job=JOB["job"], uploaded_dir=JOB.get("uploaded_dir"),
-                   settings=JOB.get("settings"), work=CONTENT / "work", keep_outputs=JOB.get("keep_outputs", False))
+                   settings=JOB.get("settings"), work=CONTENT / "work", keep_outputs=JOB.get("keep_outputs", False),
+                   install=False)
 finally:
     if JOB.get("flush_drive", True):
         try:  # make sure everything written to Drive is uploaded before the runtime stops

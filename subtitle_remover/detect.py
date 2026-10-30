@@ -142,7 +142,8 @@ class TextDetector:
             try:
                 self._gpu = _TorchDetector(self.path)
             except Exception as e:  # noqa: BLE001 - CPU detection still works
-                log.warning("GPU에서 검출 모델을 쓰지 못해 CPU로 자막을 찾아요 (느려요): %s", e)
+                hint = " → pip install onnx onnx2torch" if isinstance(e, ImportError) else ""
+                log.warning("GPU에서 검출 모델을 쓰지 못해 CPU로 자막을 찾아요 (느려요): %s%s", e, hint)
         self.device = "cuda" if self._gpu else "cpu"
         # on CPU, smaller frames keep detection time reasonable
         self.max_side = max_side if self._gpu else min(max_side, 960)

@@ -10,9 +10,12 @@ so jobs whose runtime could not start are picked up by the next run.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 import shutil
+import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +30,25 @@ JOB_FILE, STATUS_FILE, DONE_FILE = "_job.json", "_status.json", "_done.json"
 WAIT_JOB_SEC = 15 * 60  # Google Drive for desktop may still be uploading
 WAIT_FILES_SEC = 60 * 60
 POLL_SEC = 10
+# Packages a Colab runtime needs on top of its own (torch, opencv, ...), by import name.
+# They are listed here, in the code fetched from GitHub, rather than in the notebook or
+# tools/colab_bootstrap.py, whose copies on the user's side may be older.
+PACKAGES = {"onnxruntime": "onnxruntime", "onnx": "onnx", "onnx2torch": "onnx2torch", "einops": "einops"}
+NO_DEPS_PACKAGES = {"rapidocr": "rapidocr==3.10.0"}  # only its bundled detector model is used
+
+
+def install_packages() -> None:
+    """pip-install whichever of PACKAGES the runtime is missing (a no-op once they are there)."""
+    for table, flags in ((NO_DEPS_PACKAGES, ["--no-deps"]), (PACKAGES, [])):
+        missing = [spec for name, spec in table.items() if importlib.util.find_spec(name) is None]
+        if not missing:
+            continue
+        print("installing packages:", " ".join(missing), flush=True)
+        res = subprocess.run([sys.executable, "-m", "pip", "install", "-q", *flags, *missing],
+                             capture_output=True, text=True)
+        if res.returncode != 0:
+            print("⚠️ 패키지 설치 실패:", (res.stderr or res.stdout).strip()[-800:], flush=True)
+    importlib.invalidate_caches()
 
 
 def now() -> str:
@@ -154,8 +176,11 @@ def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False) -> di
 
 
 def main(base: str | Path = DEFAULT_BASE, job: str | None = None, uploaded_dir: str | None = None,
-         settings: dict | None = None, work: str | Path = "/content/work", keep_outputs: bool = False) -> list[dict]:
+         settings: dict | None = None, work: str | Path = "/content/work", keep_outputs: bool = False,
+         install: bool = True) -> list[dict]:
     """Process the given job (waiting for it to reach Drive) and any other pending jobs."""
+    if install:
+        install_packages()
     logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
     base, work = Path(base), Path(work)
     (base / "input").mkdir(parents=True, exist_ok=True)
