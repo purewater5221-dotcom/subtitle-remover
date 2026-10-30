@@ -457,7 +457,7 @@ def cmd_run(args) -> None:
         if result and not drive_root:
             local = folder / "subtitle-remover-output"
             for j in result["jobs"]:
-                for o in j["outputs"]:
+                for o in j["outputs"] + ([j["log"]] if j.get("log") else []):
                     say(f"  내 컴퓨터로 받는 중: {o}")
                     # Drive is unmounted by now; the runtime kept a local copy of each result
                     download_file(session, f"content/work/out/{j['name']}/{o}", local / j["name"] / o)
@@ -475,6 +475,7 @@ def cmd_run(args) -> None:
     for j in result["jobs"]:
         errors = f", 실패 {len(j['errors'])}개" if j["errors"] else ""
         say(f"  Google Drive > subtitle-remover > output > {j['name']} : 결과 {len(j['outputs'])}개{errors}")
+    say("  처리 기록은 같은 폴더의 _log.txt 에 남아요.")
     if drive_root:
         out_dir = drive_root / "subtitle-remover" / "output" / name
         say("  Drive 앱에 결과가 내려오기를 기다리는 중...")

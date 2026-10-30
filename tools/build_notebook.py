@@ -107,14 +107,17 @@ print("설정 완료:", TASK, "/", QUALITY, "/", REGION, "/", TARGET)
 
 RUN = '''
 #@title ③ 실행
-import logging, shutil, time
+import logging, shutil, sys
+from datetime import datetime
 from pathlib import Path
 from subtitle_remover import Config, apply_quality, parse_region
+from subtitle_remover.logs import log_to_file
 from subtitle_remover.pipeline import SubtitleRemover
 from subtitle_remover.video_io import list_videos
 
-logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
-logging.getLogger("subtitle_remover").setLevel(logging.INFO)
+logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout, force=True)
+log = logging.getLogger("subtitle_remover")
+log.setLevel(logging.INFO)
 
 cfg = apply_quality(Config(), {"빠르게": "fast", "보통": "balanced", "최고": "best"}[QUALITY])
 region_text = {"전체 화면": "all", "아래쪽 절반": "bottom", "아래쪽 1/3": "bottom-third",
@@ -129,32 +132,36 @@ in_dir, out_dir, local_out = Path(INPUT_DIR), Path(OUTPUT_DIR), Path("/content/o
 out_dir.mkdir(parents=True, exist_ok=True)
 local_out.mkdir(parents=True, exist_ok=True)
 videos = [v for v in list_videos(in_dir) if not v.stem.endswith(("_clean", "_mask"))] if in_dir.exists() else []
-if not videos:
-    print(f"⚠️ {in_dir} 에 영상이 없습니다. Drive에 영상을 올린 뒤 다시 실행하세요.")
-
-remover = SubtitleRemover(cfg)
 results = []
-for i, src in enumerate(videos, 1):
-    final = out_dir / f"{src.stem}_clean.mp4"
-    if not detect_only and final.exists() and not REDO:
-        print(f"[{i}/{len(videos)}] {src.name}: 이미 결과가 있어 건너뜀")
-        results.append((src, final))
-        continue
-    print(f"\\n[{i}/{len(videos)}] {src.name}")
-    try:
-        r = remover.process(src, local_out / final.name, detect_only=detect_only)
-    except Exception as e:
-        print(f"❌ 실패: {e}")
-        continue
-    for name in (final.name, f"{src.stem}_clean_mask.mp4", f"{src.stem}_clean_tracks.json"):
-        f = local_out / name  # result, mask preview, detection report
-        if f.exists():
-            shutil.copy(f, out_dir / name)
-            f.unlink()
-    done = out_dir / (r.output or r.preview).name
-    results.append((src, done))
-    print(f"✅ {r.seconds:.0f}초, 지운 글자 {r.removed}개 → {done}" + (f" ({r.note})" if r.note else ""))
-print("\\n끝! ④ 로 결과를 비교해 보세요.")
+if not videos:
+    raise SystemExit(f"⚠️ {in_dir} 에 영상이 없습니다. Drive에 영상을 올린 뒤 다시 실행하세요.")
+
+log_path = out_dir / "logs" / f"{datetime.now():%Y%m%d_%H%M}.txt"  # what happened, to check or send later
+with log_to_file(log_path):
+    log.info("설정: %s / %s / %s / %s", TASK, QUALITY, REGION if REGION != "직접 입력" else CUSTOM_REGION, TARGET)
+    remover = SubtitleRemover(cfg)
+    for i, src in enumerate(videos, 1):
+        final = out_dir / f"{src.stem}_clean.mp4"
+        if not detect_only and final.exists() and not REDO:
+            log.info("[%d/%d] %s: 이미 결과가 있어 건너뜀", i, len(videos), src.name)
+            results.append((src, final))
+            continue
+        print()
+        log.info("[%d/%d] %s", i, len(videos), src.name)
+        try:
+            r = remover.process(src, local_out / final.name, detect_only=detect_only)
+        except Exception as e:
+            log.exception("❌ 실패: %s", e)
+            continue
+        for name in (final.name, f"{src.stem}_clean_mask.mp4", f"{src.stem}_clean_tracks.json"):
+            f = local_out / name  # result, mask preview, detection report
+            if f.exists():
+                shutil.copy(f, out_dir / name)
+                f.unlink()
+        done = out_dir / (r.output or r.preview).name
+        results.append((src, done))
+        log.info("✅ %.0f초, 지운 글자 %d개 → %s%s", r.seconds, r.removed, done, f" ({r.note})" if r.note else "")
+print(f"\\n끝! ④ 로 결과를 비교해 보세요. 처리 기록: {log_path}")
 '''
 
 COMPARE = '''

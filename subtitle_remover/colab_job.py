@@ -2,7 +2,8 @@
 
 Google Drive layout, under MyDrive/subtitle-remover:
   input/<job>/    the videos and _job.json (file names, sizes, settings)
-  output/<job>/   <video>_clean.mp4, _status.json while running, _done.json when finished
+  output/<job>/   <video>_clean.mp4, _log.txt (what happened), _status.json while running,
+                  _done.json when finished
 
 A job folder is "pending" while it has _job.json and no output/<job>/_done.json,
 so jobs whose runtime could not start are picked up by the next run.
@@ -21,12 +22,13 @@ from datetime import datetime
 from pathlib import Path
 
 from .config import config_from_choices
+from .logs import log_to_file
 from .video_io import VIDEO_EXTS
 
 log = logging.getLogger("subtitle_remover")
 
 DEFAULT_BASE = "/content/drive/MyDrive/subtitle-remover"
-JOB_FILE, STATUS_FILE, DONE_FILE = "_job.json", "_status.json", "_done.json"
+JOB_FILE, STATUS_FILE, DONE_FILE, LOG_FILE = "_job.json", "_status.json", "_done.json", "_log.txt"
 WAIT_JOB_SEC = 15 * 60  # Google Drive for desktop may still be uploading
 WAIT_FILES_SEC = 60 * 60
 POLL_SEC = 10
@@ -116,15 +118,27 @@ def import_uploaded(base: Path, name: str, upload_dir: Path, settings: dict) -> 
 
 
 def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False) -> dict:
+    out_dir = base / "output" / name
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(flush=True)
+    with log_to_file(out_dir / LOG_FILE):
+        done = _run_job(base, name, work, keep_outputs)
+    if keep_outputs:  # downloaded with the results afterwards
+        local = work / "out" / name
+        local.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(out_dir / LOG_FILE, local / LOG_FILE)
+    return done
+
+
+def _run_job(base: Path, name: str, work: Path, keep_outputs: bool) -> dict:
     from .pipeline import SubtitleRemover
 
     job_dir, out_dir = base / "input" / name, base / "output" / name
     job = read_json(job_dir / JOB_FILE)
     files = job.get("files", [])
-    out_dir.mkdir(parents=True, exist_ok=True)
     status = {"job": name, "total": len(files), "done": 0, "current": None, "state": "waiting", "updated": now()}
     write_json(out_dir / STATUS_FILE, status)
-    print(f"\n=== 작업 {name}: 영상 {len(files)}개 ===", flush=True)
+    log.info("=== 작업 %s: 영상 %d개 ===", name, len(files))
 
     last_report = [0.0]
 
@@ -132,14 +146,16 @@ def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False) -> di
         if time.monotonic() - last_report[0] >= 60:
             last_report[0] = time.monotonic()
             left = missing_files(job_dir, files)
-            print(f"  Drive에 영상이 다 올라오기를 기다리는 중... (남은 파일 {len(left)}개)", flush=True)
+            log.info("  Drive에 영상이 다 올라오기를 기다리는 중... (남은 파일 %d개)", len(left))
 
     wait_until(lambda: not missing_files(job_dir, files), WAIT_FILES_SEC, report_wait)
     missing = missing_files(job_dir, files)
     if missing:
-        print(f"  ⚠️ 끝내 올라오지 않은 파일은 건너뜀: {', '.join(missing)}", flush=True)
+        log.warning("  ⚠️ 끝내 올라오지 않은 파일은 건너뜀: %s", ", ".join(missing))
 
     s = job.get("settings", {})
+    log.info("설정: %s", " / ".join(str(s[k]) for k in ("quality", "region", "custom_region", "target", "method")
+                                    if s.get(k)))
     cfg = config_from_choices(s.get("quality", "보통"), s.get("region", "전체 화면"), s.get("target", "overlay"),
                               s.get("custom_region", ""), s.get("method", "propainter"))
     cfg.work_dir = str(work / "cache")
@@ -149,7 +165,8 @@ def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False) -> di
     for i, f in enumerate(todo, 1):
         status.update(done=i - 1, current=f["name"], state="processing", updated=now())
         write_json(out_dir / STATUS_FILE, status)
-        print(f"\n[{i}/{len(todo)}] {f['name']}", flush=True)
+        print(flush=True)
+        log.info("[%d/%d] %s", i, len(todo), f["name"])
         local_in = work / "in" / name / f["name"]
         local_out = work / "out" / name / f"{Path(f['name']).stem}_clean.mp4"
         local_in.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +176,7 @@ def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False) -> di
             shutil.copyfile(local_out, out_dir / local_out.name)
             results.append({"file": f["name"], "output": local_out.name, "removed": r.removed,
                             "seconds": round(r.seconds, 1), "note": r.note})
-            print(f"  ✅ {r.seconds:.0f}초, 지운 글자 {r.removed}개 → output/{name}/{local_out.name}", flush=True)
+            log.info("  ✅ %.0f초, 지운 글자 %d개 → output/%s/%s", r.seconds, r.removed, name, local_out.name)
         except Exception as e:  # noqa: BLE001 - keep going with the next video
             log.exception("  ❌ %s 실패", f["name"])
             results.append({"file": f["name"], "error": str(e)})
@@ -181,7 +198,8 @@ def main(base: str | Path = DEFAULT_BASE, job: str | None = None, uploaded_dir: 
     """Process the given job (waiting for it to reach Drive) and any other pending jobs."""
     if install:
         install_packages()
-    logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
+    # one stream for prints and log lines, so they reach colab_run.bat in order
+    logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout, force=True)
     base, work = Path(base), Path(work)
     (base / "input").mkdir(parents=True, exist_ok=True)
     (base / "output").mkdir(parents=True, exist_ok=True)
@@ -202,6 +220,7 @@ def main(base: str | Path = DEFAULT_BASE, job: str | None = None, uploaded_dir: 
         print("처리할 작업이 없어요.", flush=True)
     results = [run_job(base, n, work, keep_outputs) for n in names]
     summary = {"jobs": [{"name": d["job"], "outputs": [r["output"] for r in d["results"] if "output" in r],
-                         "errors": [r["file"] for r in d["results"] if "error" in r]} for d in results]}
+                         "errors": [r["file"] for r in d["results"] if "error" in r], "log": LOG_FILE}
+                        for d in results]}
     print("@@RESULT " + json.dumps(summary, ensure_ascii=False), flush=True)
     return results

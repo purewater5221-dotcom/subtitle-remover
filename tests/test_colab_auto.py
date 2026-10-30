@@ -52,6 +52,8 @@ def test_run_with_drive_app(env):
     assert (out / "clip one_clean.mp4").exists()
     done = json.loads((out / "_done.json").read_text(encoding="utf-8"))
     assert done["results"][0]["output"] == "clip one_clean.mp4" and done["missing"] == []
+    log = (out / "_log.txt").read_text(encoding="utf-8")
+    assert "[1/1] clip one.mp4" in log and "⏱" in log and "✅" in log
     assert not (env["vm"] / ".gh_token").exists()  # token removed from the runtime after use
     calls = (env["colab"] / "calls.log").read_text()
     assert "new -s subrm-" in calls and "--gpu T4" in calls and calls.strip().splitlines()[-1].startswith("stop")
@@ -73,6 +75,7 @@ def test_run_without_drive_app_uploads_in_pieces(env):
     in_drive = out_dirs[0] / "clip one_clean.mp4"
     downloaded = env["videos"] / "subtitle-remover-output" / out_dirs[0].name / "clip one_clean.mp4"
     assert downloaded.read_bytes() == in_drive.read_bytes()
+    assert (downloaded.parent / "_log.txt").read_bytes() == (out_dirs[0] / "_log.txt").read_bytes()
     original = (env["videos"] / "clip one.mp4").read_bytes()
     assert (env["drive"] / "subtitle-remover" / "input" / out_dirs[0].name / "clip one.mp4").read_bytes() == original
     assert not list((env["vm"] / "upload").rglob("*.part*"))  # pieces were joined and removed
@@ -136,6 +139,8 @@ def test_colab_job_skips_files_that_never_arrive(tmp_path, monkeypatch, syntheti
     done = results[0]
     assert done["missing"] == ["b.mp4"] and done["results"][0]["output"] == "a_clean.mp4"
     assert (base / "output" / "2026010112" / "a_clean.mp4").exists()
+    log = (base / "output" / "2026010112" / "_log.txt").read_text(encoding="utf-8")
+    assert "b.mp4" in log and "[1/1] a.mp4" in log and "⏱" in log
     assert colab_job.pending_jobs(base) == []
     assert colab_job.unique_job_name(base, "2026010112") == "2026010112_2"
 
@@ -149,7 +154,8 @@ def test_colab_job_installs_only_missing_packages(monkeypatch):
     missing = {"rapidocr", "onnx", "onnx2torch"}  # e.g. an older bootstrap installed only the rest
     monkeypatch.setattr(importlib.util, "find_spec", lambda name, *a: None if name in missing else real(name, *a))
     calls = []
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd[3:]) or subprocess.CompletedProcess(cmd, 0))
+    done = subprocess.CompletedProcess
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd[3:]) or done(cmd, 0))
     colab_job.install_packages()
     assert calls == [["install", "-q", "--no-deps", "rapidocr==3.10.0"], ["install", "-q", "onnx", "onnx2torch"]]
 

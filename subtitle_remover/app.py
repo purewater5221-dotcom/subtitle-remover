@@ -13,10 +13,12 @@ import subprocess
 import sys
 import tempfile
 import threading
+from datetime import datetime
 from pathlib import Path
 
 from .config import QUALITY_LABELS, REGION_LABELS, TARGET_LABELS, Config, config_from_choices
 from .device import gpu_info
+from .logs import log_to_file
 from .pipeline import SubtitleRemover
 from .video_io import list_videos, make_comparison
 
@@ -97,36 +99,38 @@ def run_jobs(files, folder, task, quality, region, custom_region, target, out_di
         out_dir = Path(out_dir.strip().strip('"') or DEFAULT_OUTPUT)
         out_dir.mkdir(parents=True, exist_ok=True)
         detect_only = task == "마스크만 확인"
-        remover = _runner.get(cfg)
-        preview = None
-        for i, src in enumerate(videos, 1):
-            dst = out_dir / f"{src.stem}_clean.mp4"
-            if not detect_only and dst.exists() and not redo:
-                log.info("[%d/%d] %s: 이미 결과가 있어 건너뜀 (%s)", i, len(videos), src.name, dst)
-                continue
-            log.info("[%d/%d] %s 처리 시작", i, len(videos), src.name)
-            box: dict = {}
-            worker = threading.Thread(target=_process, args=(remover, src, dst, detect_only, box), daemon=True)
-            worker.start()
-            while worker.is_alive():
-                worker.join(1.0)
+        log_name = f"{datetime.now():%Y%m%d_%H%M%S}.txt"
+        with log_to_file(out_dir / "logs" / log_name) as log_path:  # what happened, to check or send later
+            remover = _runner.get(cfg)
+            preview = None
+            for i, src in enumerate(videos, 1):
+                dst = out_dir / f"{src.stem}_clean.mp4"
+                if not detect_only and dst.exists() and not redo:
+                    log.info("[%d/%d] %s: 이미 결과가 있어 건너뜀 (%s)", i, len(videos), src.name, dst)
+                    continue
+                log.info("[%d/%d] %s 처리 시작", i, len(videos), src.name)
+                box: dict = {}
+                worker = threading.Thread(target=_process, args=(remover, src, dst, detect_only, box), daemon=True)
+                worker.start()
+                while worker.is_alive():
+                    worker.join(1.0)
+                    yield preview, logs.text()
+                if "error" in box:
+                    log.error("❌ %s 실패: %s", src.name, box["error"], exc_info=box["error"])
+                    continue
+                r = box["result"]
+                done = r.output or r.preview
+                log.info("✅ %.0f초, 지운 글자 %d개 → %s%s", r.seconds, r.removed, done, f" ({r.note})" if r.note else "")
+                try:
+                    if r.output is not None:
+                        preview = str(make_comparison(src, r.output, PREVIEW_DIR / f"{src.stem}_compare.mp4"))
+                    elif r.preview is not None:  # mask preview only
+                        preview = _copy_preview(r.preview)
+                except Exception as e:  # noqa: BLE001 - preview is optional
+                    log.warning("미리보기를 만들지 못했어요: %s", e)
                 yield preview, logs.text()
-            if "error" in box:
-                log.error("❌ %s 실패: %s", src.name, box["error"], exc_info=box["error"])
-                continue
-            r = box["result"]
-            done = r.output or r.preview
-            log.info("✅ %.0f초, 지운 글자 %d개 → %s%s", r.seconds, r.removed, done, f" ({r.note})" if r.note else "")
-            try:
-                if r.output is not None:
-                    preview = str(make_comparison(src, r.output, PREVIEW_DIR / f"{src.stem}_compare.mp4"))
-                elif r.preview is not None:  # mask preview only
-                    preview = _copy_preview(r.preview)
-            except Exception as e:  # noqa: BLE001 - preview is optional
-                log.warning("미리보기를 만들지 못했어요: %s", e)
+            log.info("끝! 결과 폴더: %s (처리 기록: %s)", out_dir, log_path)
             yield preview, logs.text()
-        log.info("끝! 결과 폴더: %s", out_dir)
-        yield preview, logs.text()
     finally:
         log.removeHandler(logs)
 
