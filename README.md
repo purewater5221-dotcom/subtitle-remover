@@ -38,7 +38,7 @@
 1. GitHub에 로그인 → 오른쪽 위 프로필 사진 → **Settings**
 2. 왼쪽 메뉴 맨 아래 **Developer settings** → **Personal access tokens** → **Fine-grained tokens** → **Generate new token**
 3. 다음처럼 입력해요.
-   - Token name: `colab`
+   - Token name: 아무 이름이나 괜찮아요 (예: `subtitle-remover`). 이미 있는 이름은 쓸 수 없어요.
    - Expiration: 원하는 기간 (만료되면 새로 만들어서 3)번처럼 다시 저장하면 돼요)
    - Repository access: **Only select repositories** → `subtitle-remover`
    - Permissions → Repository permissions → **Contents: Read-only**
