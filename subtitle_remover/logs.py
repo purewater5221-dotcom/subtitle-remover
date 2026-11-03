@@ -6,6 +6,7 @@ import logging
 import platform
 import subprocess
 from contextlib import contextmanager
+from functools import lru_cache
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -88,6 +89,7 @@ def code_version() -> str:
     return __version__
 
 
+@lru_cache(maxsize=1)
 def environment() -> str:
     try:
         import torch
@@ -107,6 +109,7 @@ def log_to_file(path: str | Path):
     path.parent.mkdir(parents=True, exist_ok=True)
     handler = _AppendHandler(path)
     log.addHandler(handler)
+    level = log.level
     if log.getEffectiveLevel() > logging.INFO:
         log.setLevel(logging.INFO)
     log.info("── %s · %s", datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %Z"), environment())
@@ -114,3 +117,4 @@ def log_to_file(path: str | Path):
         yield path
     finally:
         log.removeHandler(handler)
+        log.setLevel(level)

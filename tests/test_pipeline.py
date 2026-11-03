@@ -48,3 +48,14 @@ def test_cli_lists_the_time_each_video_took(synthetic_clip, tmp_path, caplog):
     caplog.set_level(logging.INFO, logger="subtitle_remover")
     assert cli.main([str(synthetic_clip / "clip.mp4"), "-o", str(tmp_path / "out.mp4"), "--method", "opencv"]) == 0
     assert "⏱ 걸린 시간" in caplog.text and "clip.mp4 (180×320, 2초 영상) → " in caplog.text
+
+
+def test_job_masks_are_made_per_chunk(synthetic_clip):
+    from subtitle_remover.pipeline import _JobMasks
+
+    remover = SubtitleRemover(Config())
+    a = remover.analyze(synthetic_clip / "clip.mp4")
+    job = a.jobs[0]
+    lazy, full = _JobMasks(remover, a, job), remover.job_masks(a, job)
+    assert len(lazy) == len(full) == job.length
+    assert (lazy[5:17] == full[5:17]).all() and (lazy[0:job.length] == full).all()

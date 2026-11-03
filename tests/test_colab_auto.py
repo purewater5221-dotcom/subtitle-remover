@@ -163,6 +163,30 @@ def test_colab_job_installs_only_missing_packages(monkeypatch):
     assert calls == [["install", "-q", "--no-deps", "rapidocr==3.10.0"], ["install", "-q", "onnx", "onnx2torch"]]
 
 
+def test_check_token_only_rejects_what_github_refuses(monkeypatch):
+    import email.message
+    import urllib.error
+
+    sys.path.insert(0, str(ROOT / "tools"))
+    import colab_auto
+
+    monkeypatch.delenv("SUBRM_SKIP_TOKEN_CHECK", raising=False)
+
+    def answer(code, remaining=None):
+        headers = email.message.Message()
+        if remaining is not None:
+            headers["X-RateLimit-Remaining"] = remaining
+
+        def urlopen(*a, **k):
+            raise urllib.error.HTTPError("https://api.github.com", code, "x", headers, None)
+        monkeypatch.setattr(colab_auto.urllib.request, "urlopen", urlopen)
+
+    for code, remaining, expected in [(401, None, False), (404, None, False), (403, "4999", False),
+                                      (403, "0", None), (500, None, None), (503, None, None)]:
+        answer(code, remaining)
+        assert colab_auto.check_token("github_pat_x") is expected, (code, remaining)
+
+
 def test_setup_checks_runtime_and_drive(env):
     res = run(env["env"], "setup")
     assert res.returncode == 0, res.stdout + res.stderr

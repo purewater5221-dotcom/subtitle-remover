@@ -110,7 +110,7 @@ RUN = '''
 import logging, shutil, sys
 from datetime import datetime
 from pathlib import Path
-from subtitle_remover import Config, apply_quality, parse_region
+from subtitle_remover.config import config_from_choices
 from subtitle_remover.logs import TimeReport, format_seconds, log_to_file
 from subtitle_remover.pipeline import SubtitleRemover
 from subtitle_remover.video_io import list_videos
@@ -119,11 +119,7 @@ logging.basicConfig(level=logging.INFO, format="%(message)s", stream=sys.stdout,
 log = logging.getLogger("subtitle_remover")
 log.setLevel(logging.INFO)
 
-cfg = apply_quality(Config(), {"빠르게": "fast", "보통": "balanced", "최고": "best"}[QUALITY])
-region_text = {"전체 화면": "all", "아래쪽 절반": "bottom", "아래쪽 1/3": "bottom-third",
-               "위쪽 절반": "top", "위쪽 1/3": "top-third"}.get(REGION, CUSTOM_REGION)
-cfg.filter.regions = [r for part in region_text.split(";") if part.strip() for r in parse_region(part)]
-cfg.filter.target = "overlay" if TARGET.startswith("화면") else "all"
+cfg = config_from_choices(QUALITY, REGION, TARGET, CUSTOM_REGION)  # same as the local UI and colab_run.bat
 cfg.output.debug = SAVE_MASK_PREVIEW
 cfg.work_dir = "/content/work"
 detect_only = TASK == "마스크만 확인"

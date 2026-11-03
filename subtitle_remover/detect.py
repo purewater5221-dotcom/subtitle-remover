@@ -18,6 +18,7 @@ import numpy as np
 log = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "PP-OCRv6_det_small.onnx"
+CPU_MAX_SIDE = 960  # on CPU, smaller frames keep detection time reasonable
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,9 @@ class _TorchDetector:
         with self.torch.inference_mode():
             return self.net(self.torch.from_numpy(batch).to(self.dev)).float().cpu().numpy()
 
+    def empty_cache(self) -> None:
+        self.torch.cuda.empty_cache()
+
 
 def _cuda_available() -> bool:
     try:
@@ -145,8 +149,7 @@ class TextDetector:
                 hint = " → pip install onnx onnx2torch" if isinstance(e, ImportError) else ""
                 log.warning("GPU에서 검출 모델을 쓰지 못해 CPU로 자막을 찾아요 (느려요): %s%s", e, hint)
         self.device = "cuda" if self._gpu else "cpu"
-        # on CPU, smaller frames keep detection time reasonable
-        self.max_side = max_side if self._gpu else min(max_side, 960)
+        self.max_side = max_side if self._gpu else min(max_side, CPU_MAX_SIDE)
         self.thresh = thresh
         self.box_thresh = box_thresh
         self.unclip_ratio = unclip_ratio
@@ -167,9 +170,14 @@ class TextDetector:
         if self._gpu is not None:
             try:
                 return self._gpu(batch)
+            except Exception:  # noqa: BLE001 - often a passing out-of-memory: free the cache and retry once
+                self._gpu.empty_cache()
+            try:
+                return self._gpu(batch)
             except Exception as e:  # noqa: BLE001
-                log.warning("GPU 검출 중 오류가 나서 CPU로 바꿔요: %s", e)
+                log.warning("GPU 검출 중 오류가 나서 CPU로 바꿔요 (느려요): %s", e)
                 self._gpu, self.device = None, "cpu"
+                self.max_side = min(self.max_side, CPU_MAX_SIDE)  # smaller frames from the next batch on
         sess = self._cpu_session()
         return sess.run(None, {sess.get_inputs()[0].name: batch})[0]
 

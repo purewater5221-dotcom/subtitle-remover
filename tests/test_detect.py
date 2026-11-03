@@ -39,17 +39,37 @@ def test_falls_back_to_cpu_when_the_gpu_detector_fails(monkeypatch):
     assert any(abs(b.cy - 520) < 20 and abs(b.angle) < 5 for b in boxes)
 
 
-def test_switches_to_cpu_if_the_gpu_fails_mid_run(monkeypatch):
-    class FailsLater:
-        def __init__(self, *a, **k):
-            pass
+class _FlakyGPU:
+    """Stands in for _TorchDetector: fails the first `failures` calls, then runs on CPU."""
 
-        def __call__(self, batch):
-            raise RuntimeError("CUDA error: an illegal memory access was encountered")
+    def __init__(self, failures):
+        self.failures, self.cleared = failures, 0
+        self.cpu = TextDetector(device="cpu")
 
+    def __call__(self, batch):
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("CUDA out of memory")
+        return self.cpu._infer(batch)
+
+    def empty_cache(self):
+        self.cleared += 1
+
+
+def test_switches_to_cpu_if_the_gpu_keeps_failing(monkeypatch):
+    gpu = _FlakyGPU(failures=99)
     monkeypatch.setattr(detect, "_cuda_available", lambda: True)
-    monkeypatch.setattr(detect, "_TorchDetector", FailsLater)
+    monkeypatch.setattr(detect, "_TorchDetector", lambda *a, **k: gpu)
     det = TextDetector()
-    assert det.device == "cuda"
+    assert det.device == "cuda" and det.max_side == 1280
     assert det([frame_with_text()])[0]
-    assert det.device == "cpu"
+    assert det.device == "cpu" and det.max_side == 960 and gpu.cleared == 1
+
+
+def test_a_single_gpu_error_is_retried(monkeypatch):
+    gpu = _FlakyGPU(failures=1)
+    monkeypatch.setattr(detect, "_cuda_available", lambda: True)
+    monkeypatch.setattr(detect, "_TorchDetector", lambda *a, **k: gpu)
+    det = TextDetector()
+    assert det([frame_with_text()])[0]
+    assert det.device == "cuda" and gpu.cleared == 1

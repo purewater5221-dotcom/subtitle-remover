@@ -6,6 +6,7 @@ from subtitle_remover.logs import TimeReport, format_seconds, log_to_file
 
 def test_log_file_keeps_messages_until_the_block_ends(tmp_path):
     log = logging.getLogger("subtitle_remover")
+    log.setLevel(logging.WARNING)
     with log_to_file(tmp_path / "logs" / "run.txt") as path:
         log.info("[1/1] a.mp4")
         try:
@@ -13,6 +14,8 @@ def test_log_file_keeps_messages_until_the_block_ends(tmp_path):
         except ValueError:
             log.exception("❌ 실패")
     log.info("after the run")
+    assert log.level == logging.WARNING  # the logger is left as it was
+    log.setLevel(logging.NOTSET)
     text = path.read_text(encoding="utf-8")
     first = text.splitlines()[0]
     assert "Python" in first and "GPU" in first  # environment header

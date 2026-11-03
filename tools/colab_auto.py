@@ -279,7 +279,8 @@ def download_file(session: str, remote: str, local: Path) -> None:
 
 # ---------------------------------------------------------------- GitHub token
 def check_token(token: str) -> bool | None:
-    """True/False: the token can/cannot read the repository. None: could not check (offline)."""
+    """True/False: the token can/cannot read the repository. None: could not check (offline,
+    rate-limited or GitHub having trouble)."""
     if os.environ.get("SUBRM_SKIP_TOKEN_CHECK"):  # tests
         return True
     req = urllib.request.Request(f"https://api.github.com/repos/{REPO}",
@@ -287,8 +288,9 @@ def check_token(token: str) -> bool | None:
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             return resp.status == 200
-    except urllib.error.HTTPError:
-        return False
+    except urllib.error.HTTPError as e:
+        rate_limited = e.code in (403, 429) and e.headers.get("X-RateLimit-Remaining") == "0"
+        return False if e.code in (401, 403, 404) and not rate_limited else None
     except OSError:
         return None
 
@@ -311,7 +313,7 @@ def ensure_token(ask: bool) -> Path:
         token = input("  토큰: ").strip().strip('"')
         ok = check_token(token) if token else False
         if ok is None:
-            say("  (인터넷 연결 문제로 토큰을 확인하지 못했어요. 일단 저장할게요.)")
+            say("  (인터넷이나 GitHub 문제로 토큰을 확인하지 못했어요. 일단 저장할게요.)")
         if ok is not False:
             break
         say("  ⚠️ 이 토큰으로는 저장소에 접근할 수 없어요. 토큰과 저장소 권한(Contents: Read-only)을 확인해 주세요.")
@@ -418,14 +420,18 @@ def cmd_run(args) -> None:
         dst = base / "input" / name
         dst.mkdir(parents=True)
         say(f"\n▶ Google Drive 앱 폴더로 복사: {dst}")
-        files = []
-        for i, v in enumerate(videos, 1):
-            say(f"  [{i}/{len(videos)}] {v.name}")
-            shutil.copyfile(v, dst / v.name)
-            files.append({"name": v.name, "size": v.stat().st_size})
+        # _job.json goes first: the small file reaches Drive right away, so the runtime finds the job
+        # and then waits for each video by its size, however long the upload takes
         job = {"version": 1, "name": name, "created": datetime.now().astimezone().isoformat(timespec="seconds"),
-               "files": files, "settings": job_settings}
+               "files": [{"name": v.name, "size": v.stat().st_size} for v in videos], "settings": job_settings}
         (dst / "_job.json").write_text(json.dumps(job, ensure_ascii=False, indent=1), encoding="utf-8")
+        try:
+            for i, v in enumerate(videos, 1):
+                say(f"  [{i}/{len(videos)}] {v.name}")
+                shutil.copyfile(v, dst / v.name)
+        except BaseException:
+            shutil.rmtree(dst, ignore_errors=True)  # no half-copied job for the runtime to wait on
+            raise
         say("  (Drive 앱이 뒤에서 업로드해요. 끝날 때까지 컴퓨터를 켜 두세요.)")
     else:
         uploaded_dir = f"{VM_CONTENT}/upload/{name}"
@@ -484,7 +490,11 @@ def cmd_run(args) -> None:
         errors = f", 실패 {len(j['errors'])}개" if j["errors"] else ""
         say(f"  Google Drive > subtitle-remover > output > {j['name']} : 결과 {len(j['outputs'])}개{errors}")
     say("  처리 기록은 같은 폴더의 _log.txt 에 남아요.")
-    if drive_root:
+    if drive_root and name not in {j["name"] for j in result["jobs"]}:
+        say(f"  ⚠️ 이번 영상(input/{name})이 Colab에 아직 안 보여서 처리하지 못했어요. Drive 앱이 업로드를 마치면 "
+            "다음 실행 때 처리돼요.")
+        results_dir = drive_root / "subtitle-remover" / "output"
+    elif drive_root:
         out_dir = drive_root / "subtitle-remover" / "output" / name
         say("  Drive 앱에 결과가 내려오기를 기다리는 중...")
         for _ in range(60):

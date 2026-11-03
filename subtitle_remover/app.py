@@ -42,6 +42,8 @@ class _Runner:
 
     def __init__(self):
         self.remover: SubtitleRemover | None = None
+        # a run whose page was closed or reloaded keeps going in its thread; a new run waits for it
+        self.worker: threading.Thread | None = None
 
     def get(self, cfg: Config) -> SubtitleRemover:
         new = SubtitleRemover(cfg)
@@ -101,8 +103,13 @@ def run_jobs(files, folder, task, quality, region, custom_region, target, out_di
         detect_only = task == "마스크만 확인"
         log_name = f"{datetime.now():%Y%m%d_%H%M%S}.txt"
         with log_to_file(out_dir / "logs" / log_name) as log_path:  # what happened, to check or send later
-            remover = _runner.get(cfg)
             preview, times = None, TimeReport()
+            if _runner.worker is not None and _runner.worker.is_alive():
+                log.info("이전 작업이 아직 돌고 있어서, 끝나면 시작할게요...")
+                while _runner.worker.is_alive():
+                    _runner.worker.join(1.0)
+                    yield preview, logs.text()
+            remover = _runner.get(cfg)
             for i, src in enumerate(videos, 1):
                 dst = out_dir / f"{src.stem}_clean.mp4"
                 if not detect_only and dst.exists() and not redo:
@@ -111,6 +118,7 @@ def run_jobs(files, folder, task, quality, region, custom_region, target, out_di
                 log.info("[%d/%d] %s 처리 시작", i, len(videos), src.name)
                 box: dict = {}
                 worker = threading.Thread(target=_process, args=(remover, src, dst, detect_only, box), daemon=True)
+                _runner.worker = worker
                 worker.start()
                 while worker.is_alive():
                     worker.join(1.0)

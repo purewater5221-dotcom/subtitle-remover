@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
@@ -258,11 +259,13 @@ class SubtitleRemover:
         for arr in arrays.values():
             arr.flush()
 
-    def job_masks(self, a: Analysis, job: Job) -> np.ndarray:
+    def job_masks(self, a: Analysis, job: Job, start: int = 0, end: int | None = None) -> np.ndarray:
+        """Masks of frames [start, end) of the job (relative to job.start), at processing size."""
         x0, y0 = job.roi[:2]
-        return np.stack([rasterize([b for b in a.schedule[f] if job.owns(b)], (job.proc_h, job.proc_w),
+        end = job.length if end is None else end
+        return np.stack([rasterize([b for b in a.schedule[job.start + f] if job.owns(b)], (job.proc_h, job.proc_w),
                                    self.cfg.mask, offset=(x0, y0), scale=job.scale)
-                         for f in range(job.start, job.end)])
+                         for f in range(start, end)])
 
     def _inpaint_jobs(self, a: Analysis, work: Path) -> None:
         icfg = self.cfg.inpaint
@@ -272,7 +275,7 @@ class SubtitleRemover:
                 continue
             t = time.time()
             frames = np.load(work / f"job{job.id}_in.npy", mmap_mode="r")
-            masks = self.job_masks(a, job)
+            masks = _JobMasks(self, a, job)
             out = np.lib.format.open_memmap(work / f"job{job.id}_out.npy", mode="w+", dtype=np.uint8,
                                             shape=frames.shape)
             log.info("2/3 지우는 중: 구간 %d/%d (%d프레임, %dx%d)", k, len(a.jobs), job.length,
@@ -288,10 +291,11 @@ class SubtitleRemover:
     def _composite(self, a: Analysis, work: Path, output: Path, preview: Path | None) -> None:
         cfg, info = self.cfg, a.info
         results = {j.id: np.load(work / f"job{j.id}_out.npy", mmap_mode="r") for j in a.jobs}
+        alphas: dict[int, tuple] = {}  # job id -> (boxes, alpha): subtitles stay put for many frames
         writer = FrameWriter(output, info.width, info.height, info.fps, info.color_space, info,
                              cfg.output.crf, cfg.output.preset)
-        pw = _PreviewWriter(preview, a, cfg) if preview else None
-        with writer:
+        pw = _PreviewWriter(preview, a, cfg) if preview else contextlib.nullcontext()
+        with writer, pw:
             for idx, frame in enumerate(tqdm(read_frames(info), total=a.n_frames, desc="3/3 합치는 중",
                                              unit="f", leave=False)):
                 if idx >= a.n_frames:
@@ -300,12 +304,14 @@ class SubtitleRemover:
                 for j in a.jobs:
                     if not (j.start <= idx < j.end):
                         continue
-                    boxes = [b for b in a.schedule[idx] if j.owns(b)]
+                    boxes = tuple(b for b in a.schedule[idx] if j.owns(b))
                     if not boxes:
                         continue
                     x0, y0, x1, y1 = j.roi
-                    alpha = feather(rasterize(boxes, (j.roi_h, j.roi_w), cfg.mask, offset=(x0, y0)),
-                                    cfg.mask.feather)[..., None]
+                    if j.id not in alphas or alphas[j.id][0] != boxes:
+                        alphas[j.id] = (boxes, feather(rasterize(list(boxes), (j.roi_h, j.roi_w), cfg.mask,
+                                                                 offset=(x0, y0)), cfg.mask.feather)[..., None])
+                    alpha = alphas[j.id][1]
                     filled = np.asarray(results[j.id][idx - j.start])
                     if (j.proc_w, j.proc_h) != (j.roi_w, j.roi_h):
                         filled = cv2.resize(filled, (j.roi_w, j.roi_h), interpolation=cv2.INTER_CUBIC)
@@ -313,20 +319,17 @@ class SubtitleRemover:
                     out[y0:y1, x0:x1] = np.round(region + (filled.astype(np.float32) - region) * alpha
                                                  ).clip(0, 255).astype(np.uint8)
                 writer.write(out)
-                if pw:
+                if preview:
                     pw.write(idx, frame)
-        if pw:
-            pw.close()
 
     # ------------------------------------------------------------------ debug output
     def _write_preview(self, a: Analysis, path: Path) -> None:
-        pw = _PreviewWriter(path, a, self.cfg)
-        for idx, frame in enumerate(tqdm(read_frames(a.info), total=a.n_frames, desc="마스크 미리보기",
-                                         unit="f", leave=False)):
-            if idx >= a.n_frames:
-                break
-            pw.write(idx, frame)
-        pw.close()
+        with _PreviewWriter(path, a, self.cfg) as pw:
+            for idx, frame in enumerate(tqdm(read_frames(a.info), total=a.n_frames, desc="마스크 미리보기",
+                                             unit="f", leave=False)):
+                if idx >= a.n_frames:
+                    break
+                pw.write(idx, frame)
 
     def _write_report(self, a: Analysis, path: Path) -> None:
         report = {
@@ -376,3 +379,24 @@ class _PreviewWriter:
 
     def close(self) -> None:
         self.writer.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.writer.__exit__(*exc)  # closes the encoder, or stops it if something failed
+
+
+class _JobMasks:
+    """A job's masks, rasterized per chunk when inpaint_chunked slices them
+    rather than all at once (a long job's full stack can take a gigabyte)."""
+
+    def __init__(self, remover: SubtitleRemover, a: Analysis, job: Job):
+        self.remover, self.a, self.job = remover, a, job
+
+    def __len__(self) -> int:
+        return self.job.length
+
+    def __getitem__(self, sl: slice) -> np.ndarray:
+        start, stop, _ = sl.indices(len(self))
+        return self.remover.job_masks(self.a, self.job, start, stop)

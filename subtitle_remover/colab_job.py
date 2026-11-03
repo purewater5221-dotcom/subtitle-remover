@@ -102,16 +102,19 @@ def wait_until(check, timeout: float, on_wait=None) -> bool:
     return True
 
 
-def import_uploaded(base: Path, name: str, upload_dir: Path, settings: dict) -> str:
-    """Copy videos that were uploaded straight to the runtime into Drive input/<name>."""
+def import_uploaded(base: Path, name: str, upload_dir: Path, settings: dict, work: Path) -> str:
+    """Copy videos that were uploaded straight to the runtime into Drive input/<name>, and keep
+    them on the runtime's disk as well, where run_job picks them up instead of reading Drive."""
     name = unique_job_name(base, name)
-    dst = base / "input" / name
+    dst, local = base / "input" / name, work / "in" / name
     dst.mkdir(parents=True)
+    local.mkdir(parents=True, exist_ok=True)
     files = []
     for p in sorted(upload_dir.iterdir()):
         if p.is_file() and p.suffix.lower() in VIDEO_EXTS:
             shutil.copyfile(p, dst / p.name)
             files.append({"name": p.name, "size": p.stat().st_size})
+            p.replace(local / p.name)
     write_json(dst / JOB_FILE, {"version": 1, "name": name, "created": now(), "files": files, "settings": settings})
     print(f"Drive에 업로드: input/{name} ({len(files)}개)", flush=True)
     return name
@@ -171,7 +174,8 @@ def _run_job(base: Path, name: str, work: Path, keep_outputs: bool) -> dict:
         local_out = work / "out" / name / f"{Path(f['name']).stem}_clean.mp4"
         local_in.parent.mkdir(parents=True, exist_ok=True)
         try:
-            shutil.copyfile(job_dir / f["name"], local_in)
+            if not (local_in.exists() and local_in.stat().st_size == f["size"]):  # see import_uploaded
+                shutil.copyfile(job_dir / f["name"], local_in)
             r = remover.process(local_in, local_out)
             shutil.copyfile(local_out, out_dir / local_out.name)
             results.append({"file": f["name"], "output": local_out.name, "removed": r.removed,
@@ -211,7 +215,8 @@ def main(base: str | Path = DEFAULT_BASE, job: str | None = None, uploaded_dir: 
     (base / "output").mkdir(parents=True, exist_ok=True)
 
     if uploaded_dir:
-        job = import_uploaded(base, job or datetime.now().strftime("%Y%m%d%H"), Path(uploaded_dir), settings or {})
+        job = import_uploaded(base, job or datetime.now().strftime("%Y%m%d%H"), Path(uploaded_dir), settings or {},
+                              work)
     elif job and not (base / "input" / job / JOB_FILE).exists():
         print(f"Drive의 input/{job} 폴더가 동기화되기를 기다리는 중...", flush=True)
         if not wait_until(lambda: (base / "input" / job / JOB_FILE).exists(), WAIT_JOB_SEC):
