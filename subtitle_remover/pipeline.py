@@ -156,7 +156,11 @@ class SubtitleRemover:
         if info.is_hdr:
             log.warning("HDR 영상입니다. 결과 영상은 SDR로 저장되어 색이 조금 달라질 수 있어요.")
         fps = float(info.fps)
-        every = cfg.detect.every or (1 if self.detector.device == "cuda" else 2)
+
+        def detect_every() -> int:  # every frame on GPU, every other frame on CPU
+            return cfg.detect.every or (1 if self.detector.device == "cuda" else 2)
+
+        every = widest = detect_every()
         scenes = SceneDetector(cfg.scene.threshold, cfg.scene.min_len)
         detections: dict[int, list[TextBox]] = {}
         batch, batch_idx = [], []
@@ -177,15 +181,17 @@ class SubtitleRemover:
                 batch_idx.append(idx)
                 if len(batch) >= cfg.detect.batch:
                     flush()
+                    every = detect_every()  # the detector may have fallen back to CPU
+                    widest = max(widest, every)
             n = idx + 1
         if batch:
             flush()
         if n == 0:
             raise RuntimeError(f"프레임을 읽지 못했습니다: {path}")
 
-        tracks = build_tracks(detections, max_gap=max(every, round(cfg.filter.max_gap * fps)))
+        tracks = build_tracks(detections, max_gap=max(widest, round(cfg.filter.max_gap * fps)))
         classify_tracks(tracks, cfg.filter, fps)
-        schedule = build_schedule(tracks, n, fps, cfg.filter, every)
+        schedule = build_schedule(tracks, n, fps, cfg.filter, widest)
         scene_list = scenes.scenes(n)
         jobs = plan_jobs(schedule, scene_list, info.width, info.height, cfg.mask, cfg.inpaint)
         return Analysis(info, n, tracks, schedule, scene_list, jobs)
@@ -212,7 +218,7 @@ class SubtitleRemover:
             return VideoResult(input_path, None, preview, a.n_frames, len(a.tracks), kept, len(a.jobs),
                                time.time() - t0, "마스크 미리보기만 만들었습니다", timings, **video)
         if not a.jobs:
-            copy_as_mp4(input_path, output_path)
+            copy_as_mp4(input_path, output_path, cfg.output.crf, cfg.output.preset)
             return VideoResult(input_path, output_path, None, a.n_frames, len(a.tracks), 0, 0,
                                time.time() - t0, "지울 자막을 찾지 못해 원본을 그대로 복사했습니다", timings, **video)
 
@@ -292,10 +298,11 @@ class SubtitleRemover:
         cfg, info = self.cfg, a.info
         results = {j.id: np.load(work / f"job{j.id}_out.npy", mmap_mode="r") for j in a.jobs}
         alphas: dict[int, tuple] = {}  # job id -> (boxes, alpha): subtitles stay put for many frames
-        writer = FrameWriter(output, info.width, info.height, info.fps, info.color_space, info,
-                             cfg.output.crf, cfg.output.preset)
-        pw = _PreviewWriter(preview, a, cfg) if preview else contextlib.nullcontext()
-        with writer, pw:
+        # one stack for both encoders: if the second cannot start, the first is stopped too
+        with contextlib.ExitStack() as encoders:
+            writer = encoders.enter_context(FrameWriter(output, info.width, info.height, info.fps,
+                                                        info.color_space, info, cfg.output.crf, cfg.output.preset))
+            pw = encoders.enter_context(_PreviewWriter(preview, a, cfg)) if preview else None
             for idx, frame in enumerate(tqdm(read_frames(info), total=a.n_frames, desc="3/3 합치는 중",
                                              unit="f", leave=False)):
                 if idx >= a.n_frames:
@@ -319,7 +326,7 @@ class SubtitleRemover:
                     out[y0:y1, x0:x1] = np.round(region + (filled.astype(np.float32) - region) * alpha
                                                  ).clip(0, 255).astype(np.uint8)
                 writer.write(out)
-                if preview:
+                if pw:
                     pw.write(idx, frame)
 
     # ------------------------------------------------------------------ debug output

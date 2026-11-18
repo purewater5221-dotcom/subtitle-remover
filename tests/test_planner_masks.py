@@ -60,6 +60,16 @@ def test_plan_jobs_merges_close_lines():
     assert len(jobs) == 1
 
 
+def test_custom_region_needs_coordinates():
+    from subtitle_remover.config import config_from_choices
+
+    with pytest.raises(ValueError, match="비어"):
+        config_from_choices("보통", "직접 입력", "overlay", "  ")
+    assert config_from_choices("보통", "직접 입력", "overlay", "0,0.6,1,1").filter.regions == [(0.0, 0.6, 1.0, 1.0)]
+    with pytest.raises(ValueError, match="지우기 방식"):
+        config_from_choices(method="photoshop")
+
+
 def test_parse_region():
     assert parse_region("bottom") == [(0.0, 0.5, 1.0, 1.0)]
     assert parse_region("0, 0.6, 1, 1") == [(0.0, 0.6, 1.0, 1.0)]

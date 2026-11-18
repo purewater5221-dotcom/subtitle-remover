@@ -263,17 +263,22 @@ class FrameWriter:
             self._err.close()
 
 
-def copy_as_mp4(src: str | Path, dst: str | Path) -> None:
-    """Copy a video unchanged into an .mp4 container (plain copy if that fails)."""
+def copy_as_mp4(src: str | Path, dst: str | Path, crf: int = 17, preset: str = "fast") -> None:
+    """Copy a video into an .mp4 file: unchanged where the codecs fit, re-encoded where they do not."""
     src, dst = Path(src), Path(dst)
     dst.parent.mkdir(parents=True, exist_ok=True)
-    if src.suffix.lower() != ".mp4":
-        res = subprocess.run([_tool("ffmpeg"), "-v", "error", "-nostdin", "-y", "-i", str(src), "-map", "0:v:0",
-                              "-map", "0:a?", "-c", "copy", "-movflags", "+faststart", str(dst)],
-                             capture_output=True)
-        if res.returncode == 0:
-            return
-    shutil.copyfile(src, dst)
+    if src.suffix.lower() == ".mp4":
+        shutil.copyfile(src, dst)
+        return
+    base = [_tool("ffmpeg"), "-v", "error", "-nostdin", "-y", "-i", str(src), "-map", "0:v:0", "-map", "0:a?"]
+    if subprocess.run([*base, "-c", "copy", "-movflags", "+faststart", str(dst)], capture_output=True).returncode == 0:
+        return
+    # e.g. ProRes, FFV1 or HuffYUV video, which an .mp4 cannot hold: H.264 and AAC instead
+    res = subprocess.run([*base, "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libx264", "-preset", preset,
+                          "-crf", str(crf), "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
+                          "-movflags", "+faststart", str(dst)], capture_output=True, text=True)
+    if res.returncode != 0:
+        raise VideoError(f"mp4로 저장하지 못했습니다 ({src.name}): {res.stderr.strip()[-500:]}")
 
 
 def make_comparison(src: str | Path, dst: str | Path, out: str | Path, height: int = 640) -> Path:

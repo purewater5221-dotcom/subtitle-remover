@@ -142,11 +142,15 @@ def config_from_choices(quality: str = "보통", region: str = "전체 화면", 
                         custom_region: str = "", method: str = "propainter") -> Config:
     """Build a Config from UI choices; each accepts the Korean label or the internal value."""
     cfg = apply_quality(Config(), QUALITY_LABELS.get(quality, quality))
+    if region in REGION_LABELS and REGION_LABELS[region] is None and not custom_region.strip():
+        raise ValueError(f"영역을 '{region}'으로 골랐는데 좌표가 비어 있어요 (예: 0,0.6,1,1 = 아래쪽 40%)")
     region_text = region if region not in REGION_LABELS else (REGION_LABELS[region] or custom_region)
     cfg.filter.regions = [r for part in region_text.split(";") if part.strip() for r in parse_region(part)]
     target = TARGET_LABELS.get(target, target)
     if target not in ("overlay", "all"):
         raise ValueError(f"알 수 없는 대상: {target} (overlay, all 중 선택)")
     cfg.filter.target = target
+    if method not in ("propainter", "opencv"):
+        raise ValueError(f"알 수 없는 지우기 방식: {method} (propainter, opencv 중 선택)")
     cfg.inpaint.method = method
     return cfg

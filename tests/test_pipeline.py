@@ -3,6 +3,8 @@ import logging
 import sys
 from pathlib import Path
 
+import pytest
+
 from subtitle_remover.config import Config
 from subtitle_remover.pipeline import SubtitleRemover
 from subtitle_remover.video_io import probe
@@ -59,3 +61,44 @@ def test_job_masks_are_made_per_chunk(synthetic_clip):
     lazy, full = _JobMasks(remover, a, job), remover.job_masks(a, job)
     assert len(lazy) == len(full) == job.length
     assert (lazy[5:17] == full[5:17]).all() and (lazy[0:job.length] == full).all()
+
+
+def test_detection_skips_frames_once_the_gpu_falls_back_to_cpu(synthetic_clip):
+    class FallsBack:  # stands in for TextDetector: the first batch runs on the GPU, then it switches to CPU
+        device = "cuda"
+        frames = 0
+
+        def __call__(self, frames):
+            self.frames += len(frames)
+            self.device = "cpu"
+            return [[] for _ in frames]
+
+    remover = SubtitleRemover(Config())
+    remover._detector = det = FallsBack()
+    a = remover.analyze(synthetic_clip / "clip.mp4")
+    batch = Config().detect.batch
+    assert det.frames == batch + len([i for i in range(batch, a.n_frames) if i % 2 == 0])
+
+
+def test_main_encoder_stops_when_the_preview_encoder_cannot_start(synthetic_clip, tmp_path, monkeypatch):
+    from subtitle_remover import pipeline
+
+    started = []
+
+    class Recorded(pipeline.FrameWriter):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            started.append(self)
+
+    class BrokenPreview:
+        def __init__(self, *a, **k):
+            raise OSError("cannot start the preview encoder")
+
+    monkeypatch.setattr(pipeline, "FrameWriter", Recorded)
+    monkeypatch.setattr(pipeline, "_PreviewWriter", BrokenPreview)
+    cfg = Config()
+    cfg.inpaint.method = "opencv"
+    cfg.output.debug = True  # also writes the mask preview
+    with pytest.raises(OSError):
+        SubtitleRemover(cfg).process(synthetic_clip / "clip.mp4", tmp_path / "out.mp4")
+    assert len(started) == 1 and started[0]._proc.poll() is not None  # no ffmpeg left waiting for frames

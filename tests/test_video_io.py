@@ -1,10 +1,11 @@
+import json
 import subprocess
 from fractions import Fraction
 
 import numpy as np
 import pytest
 
-from subtitle_remover.video_io import FrameWriter, probe, read_frames
+from subtitle_remover.video_io import FrameWriter, copy_as_mp4, probe, read_frames
 
 
 def make_clip(path, extra_v=(), size="96x64", rate="30", seconds=1, audio=True):
@@ -81,3 +82,17 @@ def test_gray_roundtrip_exact(tmp_path):
             w.write(gray)
     back = next(iter(read_frames(probe(p))))
     assert np.abs(back.astype(int) - 128).max() <= 1
+
+
+def test_copy_as_mp4_reencodes_codecs_an_mp4_cannot_hold(tmp_path):
+    src = tmp_path / "lossless.mkv"  # FFV1 video cannot be copied into an .mp4 as it is
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=96x64:rate=10:duration=1",
+                    "-f", "lavfi", "-i", "sine=duration=1", "-c:v", "ffv1", "-c:a", "flac", "-shortest", str(src)],
+                   check=True)
+    dst = tmp_path / "lossless_clean.mp4"
+    copy_as_mp4(src, dst)
+    res = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=format_name:stream=codec_name",
+                          "-of", "json", str(dst)], capture_output=True, text=True, check=True)
+    info = json.loads(res.stdout)
+    assert "mp4" in info["format"]["format_name"]
+    assert sorted(s["codec_name"] for s in info["streams"]) == ["aac", "h264"]

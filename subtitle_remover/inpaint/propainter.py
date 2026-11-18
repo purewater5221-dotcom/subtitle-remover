@@ -85,22 +85,40 @@ def ensure_propainter(root: Path | None = None) -> Path:
     return root
 
 
+class _BadCheckpoint(Exception):
+    """torch.load could not read a weights file (a mangled or cut-off download, for example)."""
+
+    def __init__(self, path: str | os.PathLike, error: Exception):
+        super().__init__(f"{Path(path).name}: {error}")
+        self.path = Path(path)
+
+
+class _NonFinite(Exception):
+    """The FP16 computation produced invalid values (NaN or infinity)."""
+
+
 @contextlib.contextmanager
 def _compatible_torch_load():
     """ProPainter calls torch.load() without weights_only. Newer PyTorch
     defaults to weights_only=True; if a checkpoint needs more than that, retry
-    the official release checkpoint with weights_only=False."""
+    the official release checkpoint with weights_only=False. A weights file that
+    cannot be read at all is reported as _BadCheckpoint."""
     import torch
 
     original = torch.load
 
-    def load(*args, **kwargs):
+    def load(f, *args, **kwargs):
         try:
-            return original(*args, **kwargs)
+            try:
+                return original(f, *args, **kwargs)
+            except Exception as e:
+                if "weights_only" not in str(e) or "weights_only" in kwargs:
+                    raise
+                return original(f, *args, **kwargs, weights_only=False)
         except Exception as e:
-            if "weights_only" not in str(e) or "weights_only" in kwargs:
-                raise
-            return original(*args, **kwargs, weights_only=False)
+            if isinstance(f, (str, os.PathLike)):
+                raise _BadCheckpoint(f, e) from e
+            raise
 
     torch.load = load
     try:
@@ -152,8 +170,24 @@ class ProPainterInpainter:
         from model.recurrent_flow_completion import RecurrentFlowCompleteNet
 
         weights = root / "weights"
-        with _compatible_torch_load():
-            self._build(RAFT_bi, RecurrentFlowCompleteNet, InpaintGenerator, weights)
+
+        def build():
+            with _compatible_torch_load():
+                self._build(RAFT_bi, RecurrentFlowCompleteNet, InpaintGenerator, weights)
+
+        try:
+            build()
+        except _BadCheckpoint as e:
+            if e.path.resolve().parent != weights.resolve():
+                raise
+            log.warning("ProPainter 모델 파일을 읽지 못해서 다시 받아요 (%s)", e)
+            e.path.unlink(missing_ok=True)
+            ensure_propainter(root)
+            try:
+                build()
+            except _BadCheckpoint as again:
+                raise RuntimeError(f"ProPainter 모델 파일을 읽지 못했어요 ({again}). "
+                                   f"인터넷 연결을 확인하고 다시 실행해 주세요.") from again
 
     def _build(self, RAFT_bi, RecurrentFlowCompleteNet, InpaintGenerator, weights: Path) -> None:
         import torch
@@ -162,10 +196,10 @@ class ProPainterInpainter:
             # crop sizes repeat within a job, so cuDNN's autotuned kernels pay off
             torch.backends.cudnn.benchmark = True
         self.raft = RAFT_bi(str(weights / "raft-things.pth"), self.device)
-        raft_model = getattr(self.raft, "fix_raft", None)
-        if self.half and hasattr(raft_model, "args"):
+        self._raft_args = getattr(getattr(self.raft, "fix_raft", None), "args", None)
+        if self.half and self._raft_args is not None:
             # RAFT's own mixed-precision mode: encoders and update block in fp16, correlation stays fp32
-            raft_model.args.mixed_precision = True
+            self._raft_args.mixed_precision = True
         self.flow_complete = RecurrentFlowCompleteNet(str(weights / "recurrent_flow_completion.pth"))
         for p in self.flow_complete.parameters():
             p.requires_grad = False
@@ -181,7 +215,20 @@ class ProPainterInpainter:
             reps = MIN_FRAMES - n
             frames = np.concatenate([frames, np.repeat(frames[-1:], reps, 0)])
             masks = np.concatenate([masks, np.repeat(masks[-1:], reps, 0)])
-        return self._run(frames, masks)[:n]
+        try:
+            return self._run(frames, masks)[:n]
+        except _NonFinite:
+            log.warning("FP16 계산에서 오류 값이 나와서 FP32로 바꿔 다시 처리해요 (조금 느려져요).")
+            self._use_fp32()
+            return self._run(frames, masks)[:n]
+
+    def _use_fp32(self) -> None:
+        self.half = False
+        self.flow_complete = self.flow_complete.float()
+        self.model = self.model.float()
+        if self._raft_args is not None:
+            self._raft_args.mixed_precision = False
+        self._empty_cache()
 
     def _empty_cache(self):
         import torch
@@ -286,6 +333,12 @@ class ProPainterInpainter:
                     cnt[idx] += 1
                 self._empty_cache()
 
-        filled = (acc / np.maximum(cnt, 1)[:, None, None, None]).round().astype(np.uint8)[..., ::-1]
+        filled = acc / np.maximum(cnt, 1)[:, None, None, None]
+        if not np.isfinite(filled).all():  # would come out as black patches
+            if self.half:
+                raise _NonFinite
+            log.warning("메꾼 결과에 계산 오류 값이 있어서, 그 부분은 원본 그대로 둬요.")
+            filled = np.where(np.isfinite(filled), filled, rgb)
+        filled = filled.round().astype(np.uint8)[..., ::-1]
         m = dilated_np[..., None].astype(bool)
         return np.where(m, filled, frames_bgr)

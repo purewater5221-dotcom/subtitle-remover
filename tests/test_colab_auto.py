@@ -122,7 +122,7 @@ def test_echo_hides_internal_lines_and_shows_prompts(capsys):
     assert capsys.readouterr().out == "[colab] Uploaded\nTo authorize, visit this URL\n"
 
 
-def test_colab_job_skips_files_that_never_arrive(tmp_path, monkeypatch, synthetic_clip):
+def test_colab_job_skips_files_that_never_arrive(tmp_path, monkeypatch, synthetic_clip, capsys):
     from subtitle_remover import colab_job
 
     monkeypatch.setattr(colab_job, "WAIT_FILES_SEC", 0)
@@ -144,8 +144,74 @@ def test_colab_job_skips_files_that_never_arrive(tmp_path, monkeypatch, syntheti
     log = (base / "output" / "2026010112" / "_log.txt").read_text(encoding="utf-8")
     assert "b.mp4" in log and "[1/1] a.mp4" in log and "⏱ 걸린 시간" in log
     assert "  a.mp4 (180×320, 2초 영상) → " in log and done["seconds"] > 0
+    summary = json.loads(capsys.readouterr().out.split("@@RESULT ", 1)[1])["jobs"][0]
+    assert summary["missing"] == ["b.mp4"] and summary["error"] is None  # shown at the end of colab_run
     assert colab_job.pending_jobs(base) == []
     assert colab_job.unique_job_name(base, "2026010112") == "2026010112_2"
+
+
+def test_colab_job_goes_on_past_broken_and_half_copied_jobs(tmp_path, monkeypatch, synthetic_clip):
+    from subtitle_remover import colab_job
+
+    waits = []
+    real_wait = colab_job.wait_until
+
+    def wait_until(check, timeout, on_wait=None):  # note how long each job would wait, then don't
+        waits.append(timeout)
+        return real_wait(check, 0, on_wait)
+
+    monkeypatch.setattr(colab_job, "wait_until", wait_until)
+    base = tmp_path / "drive" / "subtitle-remover"
+    clip = (synthetic_clip / "clip.mp4").read_bytes()
+
+    def job(name, files, settings=None):
+        d = base / "input" / name
+        d.mkdir(parents=True)
+        for fname, data in files.items():
+            (d / fname).write_bytes(data)
+        listed = [{"name": f, "size": len(clip)} for f in files]
+        colab_job.write_json(d / "_job.json", {"files": listed, "settings": settings or {"method": "opencv"}})
+        return d
+
+    job("2026010113", {"a.mp4": clip})  # this run's job
+    job("2026010110", {"b.mp4": clip[:100]})  # an earlier run's copy was cut off
+    job("2026010111", {"c.mp4": clip}, {"method": "opencv", "region": "직접 입력", "custom_region": "0,0.6,1"})
+    (job("2026010112", {}) / "_job.json").write_text('{"files": [', encoding="utf-8")  # cut-off job file
+
+    results = {d["job"]: d for d in colab_job.main(base=base, job="2026010113", work=tmp_path / "work")}
+    assert results["2026010113"]["results"][0]["output"] == "a_clean.mp4"
+    assert results["2026010110"]["missing"] == ["b.mp4"] and "error" not in results["2026010110"]
+    assert "영역" in results["2026010111"]["error"] and results["2026010112"]["error"]
+    # only this run's job waits long; broken settings fail before any waiting
+    assert waits == [colab_job.WAIT_FILES_SEC, colab_job.LEFTOVER_WAIT_SEC]
+    assert colab_job.pending_jobs(base) == []  # nothing is left to stop the next run
+    assert "처리하지 못해서 건너뛰어요" in (base / "output" / "2026010112" / "_log.txt").read_text(encoding="utf-8")
+
+
+def test_job_summary_lists_skipped_and_failed_videos():
+    sys.path.insert(0, str(ROOT / "tools"))
+    import colab_auto
+
+    lines = colab_auto.job_summary({"name": "2026010112", "outputs": ["a_clean.mp4"], "errors": ["c.mp4"],
+                                    "missing": ["b.mp4"], "error": None})
+    assert lines[0].endswith("2026010112 : 결과 1개, 실패 1개, 건너뜀 1개")
+    assert any("c.mp4" in line and "실패" in line for line in lines)
+    assert any("b.mp4" in line and "건너뛴" in line for line in lines)
+    failed = colab_auto.job_summary({"name": "x", "outputs": [], "errors": [], "missing": [], "error": "boom"})
+    assert failed[-1].endswith("작업을 처리하지 못했어요: boom")
+    assert colab_auto.job_summary({"name": "old", "outputs": ["a"], "errors": []})  # an older runtime's summary
+
+
+def test_run_stops_on_bad_settings_before_uploading(env):
+    settings = Path(env["env"]["HOME"]) / ".config" / "subtitle-remover" / "colab.json"
+    e = {**env["env"], "SUBRM_DRIVE_ROOT": str(env["drive"])}
+    for text, message in [(json.dumps({"region": "직접 입력", "custom_region": ""}), "colab.json 설정이 잘못됐어요"),
+                          ('{"region": "아래쪽 절반",}', "colab.json 형식이 잘못됐어요")]:
+        settings.write_text(text, encoding="utf-8")
+        res = run(e, "run", str(env["videos"]))
+        assert res.returncode == 1 and message in res.stdout, res.stdout + res.stderr
+    assert not (env["drive"] / "subtitle-remover").exists()  # nothing was copied
+    assert not (env["colab"] / "calls.log").exists()  # and no runtime was started
 
 
 def test_colab_job_installs_only_missing_packages(monkeypatch):

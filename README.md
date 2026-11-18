@@ -39,7 +39,7 @@
 
 ## B. 내 컴퓨터에서 쓰기 (NVIDIA 그래픽카드)
 
-**필요한 것**: NVIDIA 그래픽카드(VRAM 8GB 이상 권장. 6GB도 되지만 처리 크기를 줄여서 조금 덜 선명해요), Windows 10/11 64비트 또는 리눅스, 최신 NVIDIA 드라이버, Python 3.12, 디스크 여유 약 10GB
+**필요한 것**: NVIDIA 그래픽카드(VRAM 8GB 이상 권장. 6GB도 되지만 처리 크기를 줄여서 조금 덜 선명해요. GTX 1650·1660 같은 GTX 16 시리즈는 결과가 까맣게 나오는 문제를 피하려고 FP32로 처리해서 더 느리고 처리 크기도 작아요), Windows 10/11 64비트 또는 리눅스, 최신 NVIDIA 드라이버, Python 3.12, 디스크 여유 약 10GB
 
 **처음 한 번 (Windows)**
 1. NVIDIA 드라이버를 최신으로 업데이트해요 ([nvidia.com/drivers](https://www.nvidia.com/drivers)).

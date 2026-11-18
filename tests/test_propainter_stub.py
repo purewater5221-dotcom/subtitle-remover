@@ -46,6 +46,8 @@ class InpaintGenerator(torch.nn.Module):
     calls = []
     def __init__(self, model_path=None):
         super().__init__()
+        if model_path:
+            torch.load(model_path)  # like the real model: the weights file must be readable
         self.p = torch.nn.Parameter(torch.zeros(1))
     def img_propagation(self, masked_frames, flows, masks, interpolation):
         b, t, c, h, w = masked_frames.shape
@@ -55,7 +57,9 @@ class InpaintGenerator(torch.nn.Module):
         b, t, c, h, w = imgs.shape
         assert flows[0].size(1) == l_t - 1 and masks.size(1) == t and upd_masks.size(1) == t
         InpaintGenerator.calls.append((t, l_t))
-        return torch.full((b, l_t, 3, h, w), 0.5, dtype=imgs.dtype, device=imgs.device)
+        # like FP16 on a GTX 16xx card: invalid values in half precision
+        value = float("nan") if imgs.dtype == torch.float16 else 0.5
+        return torch.full((b, l_t, 3, h, w), value, dtype=imgs.dtype, device=imgs.device)
 """,
 }
 
@@ -69,7 +73,7 @@ def stub_root(tmp_path):
         path.write_text(src)
     for name in WEIGHTS:
         (root / "weights").mkdir(exist_ok=True)
-        (root / "weights" / name).write_bytes(b"stub")
+        torch.save({}, root / "weights" / name)
     saved = {k: v for k, v in sys.modules.items() if k == "model" or k.startswith("model.")}
     for k in saved:
         del sys.modules[k]
@@ -108,6 +112,36 @@ def test_wrapper_pads_very_short_clips(stub_root):
     masks = np.ones((1, 16, 16), np.uint8)
     out = ip.inpaint(frames, masks)
     assert out.shape == (1, 16, 16, 3) and (out == 191).all()
+
+
+def test_invalid_fp16_results_are_redone_in_fp32(stub_root):
+    ip = ProPainterInpainter(InpaintConfig(), device="cpu", root=stub_root)
+    # as on a GPU in half precision (the stub then returns NaN, as GTX 16xx cards can)
+    ip.half, ip.flow_complete, ip.model = True, ip.flow_complete.half(), ip.model.half()
+    frames = np.full((6, 16, 16, 3), 40, np.uint8)
+    masks = np.ones((6, 16, 16), np.uint8)
+    out = ip.inpaint(frames, masks)
+    assert ip.half is False and (out == 191).all()  # redone in FP32 instead of black patches
+
+
+def test_unreadable_weights_are_downloaded_again(stub_root, monkeypatch):
+    from subtitle_remover.inpaint import propainter
+
+    (stub_root / "weights" / "ProPainter.pth").write_bytes(b"<html>not a checkpoint</html>")
+    fetched = []
+
+    def download(url, dest):
+        fetched.append(dest.name)
+        torch.save({}, dest)
+
+    monkeypatch.setattr(propainter, "_download", download)
+    ProPainterInpainter(InpaintConfig(), device="cpu", root=stub_root)
+    assert fetched == ["ProPainter.pth"]
+
+    (stub_root / "weights" / "ProPainter.pth").write_bytes(b"broken")
+    monkeypatch.setattr(propainter, "_download", lambda url, dest: dest.write_bytes(b"broken again"))
+    with pytest.raises(RuntimeError, match="읽지 못했어요"):
+        ProPainterInpainter(InpaintConfig(), device="cpu", root=stub_root)
 
 
 def test_ensure_propainter_without_git_uses_source_zip(tmp_path, monkeypatch):

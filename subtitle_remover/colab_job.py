@@ -6,7 +6,9 @@ Google Drive layout, under MyDrive/subtitle-remover:
                   _done.json when finished
 
 A job folder is "pending" while it has _job.json and no output/<job>/_done.json,
-so jobs whose runtime could not start are picked up by the next run.
+so jobs whose runtime could not start are picked up by the next run. A job that
+cannot be processed at all (a broken _job.json, wrong settings) still gets a
+_done.json, with "error", so later runs do not stop at it again.
 """
 
 from __future__ import annotations
@@ -30,7 +32,8 @@ log = logging.getLogger("subtitle_remover")
 DEFAULT_BASE = "/content/drive/MyDrive/subtitle-remover"
 JOB_FILE, STATUS_FILE, DONE_FILE, LOG_FILE = "_job.json", "_status.json", "_done.json", "_log.txt"
 WAIT_JOB_SEC = 15 * 60  # Google Drive for desktop may still be uploading
-WAIT_FILES_SEC = 60 * 60
+WAIT_FILES_SEC = 60 * 60  # this run's videos: Google Drive for desktop may still be uploading them
+LEFTOVER_WAIT_SEC = 2 * 60  # earlier runs' jobs had time to upload; what is still missing was cut off
 POLL_SEC = 10
 # Packages a Colab runtime needs on top of its own (torch, opencv, ...), by import name.
 # They are listed here, in the code fetched from GitHub, rather than in the notebook or
@@ -120,12 +123,18 @@ def import_uploaded(base: Path, name: str, upload_dir: Path, settings: dict, wor
     return name
 
 
-def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False) -> dict:
+def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False, wait_files: float | None = None) -> dict:
     out_dir = base / "output" / name
     out_dir.mkdir(parents=True, exist_ok=True)
     print(flush=True)
     with log_to_file(out_dir / LOG_FILE):
-        done = _run_job(base, name, work, keep_outputs)
+        try:
+            done = _run_job(base, name, work, keep_outputs, WAIT_FILES_SEC if wait_files is None else wait_files)
+        except Exception as e:  # noqa: BLE001 - one broken job must not stop the others
+            log.exception("❌ 작업 %s 을(를) 처리하지 못해서 건너뛰어요.", name)
+            # recorded as finished all the same, so the next runs do not stop at it again
+            done = {"job": name, "finished": now(), "results": [], "missing": [], "seconds": 0.0, "error": str(e)}
+            write_json(out_dir / DONE_FILE, done)
     if keep_outputs:  # downloaded with the results afterwards
         local = work / "out" / name
         local.mkdir(parents=True, exist_ok=True)
@@ -133,7 +142,7 @@ def run_job(base: Path, name: str, work: Path, keep_outputs: bool = False) -> di
     return done
 
 
-def _run_job(base: Path, name: str, work: Path, keep_outputs: bool) -> dict:
+def _run_job(base: Path, name: str, work: Path, keep_outputs: bool, wait_files: float) -> dict:
     from .pipeline import SubtitleRemover
 
     job_dir, out_dir = base / "input" / name, base / "output" / name
@@ -143,6 +152,14 @@ def _run_job(base: Path, name: str, work: Path, keep_outputs: bool) -> dict:
     write_json(out_dir / STATUS_FILE, status)
     log.info("=== 작업 %s: 영상 %d개 ===", name, len(files))
 
+    # settings first: a mistake in them should not wait for the upload to finish
+    s = job.get("settings", {})
+    log.info("설정: %s", " / ".join(str(s[k]) for k in ("quality", "region", "custom_region", "target", "method")
+                                    if s.get(k)))
+    cfg = config_from_choices(s.get("quality", "보통"), s.get("region", "전체 화면"), s.get("target", "overlay"),
+                              s.get("custom_region", ""), s.get("method", "propainter"))
+    cfg.work_dir = str(work / "cache")
+
     last_report = [0.0]
 
     def report_wait():  # at most once a minute
@@ -151,17 +168,11 @@ def _run_job(base: Path, name: str, work: Path, keep_outputs: bool) -> dict:
             left = missing_files(job_dir, files)
             log.info("  Drive에 영상이 다 올라오기를 기다리는 중... (남은 파일 %d개)", len(left))
 
-    wait_until(lambda: not missing_files(job_dir, files), WAIT_FILES_SEC, report_wait)
+    wait_until(lambda: not missing_files(job_dir, files), wait_files, report_wait)
     missing = missing_files(job_dir, files)
     if missing:
         log.warning("  ⚠️ 끝내 올라오지 않은 파일은 건너뜀: %s", ", ".join(missing))
 
-    s = job.get("settings", {})
-    log.info("설정: %s", " / ".join(str(s[k]) for k in ("quality", "region", "custom_region", "target", "method")
-                                    if s.get(k)))
-    cfg = config_from_choices(s.get("quality", "보통"), s.get("region", "전체 화면"), s.get("target", "overlay"),
-                              s.get("custom_region", ""), s.get("method", "propainter"))
-    cfg.work_dir = str(work / "cache")
     remover = SubtitleRemover(cfg)
     results, times = [], TimeReport()
     todo = [f for f in files if f["name"] not in missing]
@@ -229,9 +240,10 @@ def main(base: str | Path = DEFAULT_BASE, job: str | None = None, uploaded_dir: 
         names.insert(0, job)
     if not names:
         print("처리할 작업이 없어요.", flush=True)
-    results = [run_job(base, n, work, keep_outputs) for n in names]
+    results = [run_job(base, n, work, keep_outputs, WAIT_FILES_SEC if n == job else LEFTOVER_WAIT_SEC)
+               for n in names]
     summary = {"jobs": [{"name": d["job"], "outputs": [r["output"] for r in d["results"] if "output" in r],
-                         "errors": [r["file"] for r in d["results"] if "error" in r], "log": LOG_FILE,
-                         "seconds": d["seconds"]} for d in results]}
+                         "errors": [r["file"] for r in d["results"] if "error" in r], "missing": d["missing"],
+                         "error": d.get("error"), "log": LOG_FILE, "seconds": d["seconds"]} for d in results]}
     print("@@RESULT " + json.dumps(summary, ensure_ascii=False), flush=True)
     return results

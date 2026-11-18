@@ -11,7 +11,8 @@ the runtime, process the videos and stop the runtime again.
 Videos go to Google Drive as subtitle-remover/input/YYYYMMDDHH: through
 "Google Drive for desktop" when it is installed (copying into its folder), or
 uploaded to the runtime directly otherwise. Results are written to
-subtitle-remover/output/YYYYMMDDHH. Standard library only.
+subtitle-remover/output/YYYYMMDDHH. Standard library only (subtitle_remover.config,
+used to check the settings, is too).
 """
 
 from __future__ import annotations
@@ -33,6 +34,9 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+from subtitle_remover.config import config_from_choices  # noqa: E402 - standard library only, like this script
+
 VENV = ROOT / ".venv-colab"
 REPO = "purewater5221-dotcom/subtitle-remover"
 BRANCH = "main"
@@ -75,8 +79,20 @@ def load_settings() -> dict:
     path = config_dir() / "colab.json"
     settings = dict(DEFAULT_SETTINGS)
     if path.exists():
-        settings.update(json.loads(path.read_text(encoding="utf-8-sig")))
+        try:
+            settings.update(json.loads(path.read_text(encoding="utf-8-sig")))
+        except json.JSONDecodeError as e:
+            raise Stop(f"colab.json 형식이 잘못됐어요 ({e.lineno}번째 줄). 따옴표(\")와 쉼표(,)를 확인해 주세요: {path}")
     return settings
+
+
+def check_settings(settings: dict) -> None:
+    """Catch a mistake in colab.json here, before anything is uploaded or a runtime is started."""
+    try:
+        config_from_choices(settings["quality"], settings["region"], settings["target"],
+                            settings["custom_region"], settings["method"])
+    except (ValueError, TypeError, AttributeError) as e:
+        raise Stop(f"colab.json 설정이 잘못됐어요: {e}\n   메모장으로 고친 뒤 다시 실행해 주세요: {config_dir() / 'colab.json'}")
 
 
 def save_settings(settings: dict) -> None:
@@ -402,6 +418,7 @@ def cmd_run(args) -> None:
     colab_cmd()
     token = ensure_token(ask=False)
     settings = load_settings()
+    check_settings(settings)
     folder = ask_folder(args.folder)
     videos = list_videos(folder)
     if not videos:
@@ -487,8 +504,8 @@ def cmd_run(args) -> None:
                    "다음 실행 때 이어서 처리돼요.")
     say("\n✅ 끝!")
     for j in result["jobs"]:
-        errors = f", 실패 {len(j['errors'])}개" if j["errors"] else ""
-        say(f"  Google Drive > subtitle-remover > output > {j['name']} : 결과 {len(j['outputs'])}개{errors}")
+        for line in job_summary(j):
+            say(line)
     say("  처리 기록은 같은 폴더의 _log.txt 에 남아요.")
     if drive_root and name not in {j["name"] for j in result["jobs"]}:
         say(f"  ⚠️ 이번 영상(input/{name})이 Colab에 아직 안 보여서 처리하지 못했어요. Drive 앱이 업로드를 마치면 "
@@ -511,6 +528,21 @@ def cmd_run(args) -> None:
               if 0 < work <= total else "")
     say(f"\n⏱ 전체 걸린 시간: {format_seconds(total)}{detail}")
     open_folder(results_dir)
+
+
+def job_summary(j: dict) -> list[str]:
+    """How one job ended, for the summary at the end of a run."""
+    counts = f"결과 {len(j['outputs'])}개"
+    counts += f", 실패 {len(j['errors'])}개" if j.get("errors") else ""
+    counts += f", 건너뜀 {len(j['missing'])}개" if j.get("missing") else ""
+    lines = [f"  Google Drive > subtitle-remover > output > {j['name']} : {counts}"]
+    if j.get("errors"):
+        lines.append(f"    ❌ 실패한 영상: {', '.join(j['errors'])} (이유는 _log.txt 에 있어요)")
+    if j.get("missing"):
+        lines.append(f"    ⚠️ Drive에 다 올라오지 않아 건너뛴 영상: {', '.join(j['missing'])}")
+    if j.get("error"):
+        lines.append(f"    ❌ 작업을 처리하지 못했어요: {j['error']}")
+    return lines
 
 
 def cmd_stop(args) -> None:
