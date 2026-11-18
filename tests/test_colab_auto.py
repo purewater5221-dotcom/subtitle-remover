@@ -214,6 +214,13 @@ def test_run_stops_on_bad_settings_before_uploading(env):
     assert not (env["colab"] / "calls.log").exists()  # and no runtime was started
 
 
+def test_run_stops_when_two_videos_would_get_the_same_result_name(env):
+    (env["videos"] / "Clip One.mov").write_bytes((env["videos"] / "clip one.mp4").read_bytes())
+    res = run({**env["env"], "SUBRM_DRIVE_ROOT": str(env["drive"])}, "run", str(env["videos"]))
+    assert res.returncode == 1 and "이름이 같은 영상이 있어요" in res.stdout and "Clip One.mov" in res.stdout
+    assert not (env["drive"] / "subtitle-remover").exists()  # stopped before copying anything
+
+
 def test_colab_job_installs_only_missing_packages(monkeypatch):
     import importlib.util
 

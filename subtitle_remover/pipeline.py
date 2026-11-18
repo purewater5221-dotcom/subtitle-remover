@@ -384,9 +384,6 @@ class _PreviewWriter:
             cv2.rectangle(img, (0, 0), (self.size[0] - 1, self.size[1] - 1), (255, 255, 255), 6)
         self.writer.write(img)
 
-    def close(self) -> None:
-        self.writer.close()
-
     def __enter__(self):
         return self
 

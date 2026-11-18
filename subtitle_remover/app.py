@@ -7,6 +7,7 @@ http://127.0.0.1:7860. Same engine and settings as the Colab notebook.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import logging
 import os
 import subprocess
@@ -231,9 +232,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--method", default="propainter", choices=["propainter", "opencv"])
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    try:
-        import gradio  # noqa: F401
-    except ImportError:
+    if importlib.util.find_spec("gradio") is None:
         print("gradio가 설치돼 있지 않아요: pip install gradio")
         return 1
     demo = build_ui(args.method)

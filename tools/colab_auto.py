@@ -11,8 +11,8 @@ the runtime, process the videos and stop the runtime again.
 Videos go to Google Drive as subtitle-remover/input/YYYYMMDDHH: through
 "Google Drive for desktop" when it is installed (copying into its folder), or
 uploaded to the runtime directly otherwise. Results are written to
-subtitle-remover/output/YYYYMMDDHH. Standard library only (subtitle_remover.config,
-used to check the settings, is too).
+subtitle-remover/output/YYYYMMDDHH. Standard library only, as are the two parts of
+subtitle_remover it uses (config, to check the settings, and logs).
 """
 
 from __future__ import annotations
@@ -36,6 +36,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from subtitle_remover.config import config_from_choices  # noqa: E402 - standard library only, like this script
+from subtitle_remover.logs import format_seconds  # noqa: E402 - likewise
 
 VENV = ROOT / ".venv-colab"
 REPO = "purewater5221-dotcom/subtitle-remover"
@@ -55,13 +56,6 @@ class Stop(Exception):
 
 def say(msg: str = "") -> None:
     print(msg, flush=True)
-
-
-def format_seconds(sec: float) -> str:
-    """45초, 4분 12초, 1시간 2분 3초 (same as subtitle_remover.logs, which this script does not import)"""
-    s = round(sec)
-    text = " ".join(f"{n}{unit}" for n, unit in ((s // 3600, "시간"), (s // 60 % 60, "분"), (s % 60, "초")) if n)
-    return text or "0초"
 
 
 # ---------------------------------------------------------------- local config
@@ -379,12 +373,13 @@ def cmd_setup(args) -> None:
         say("  처음이면 브라우저에 Drive 허용 화면이 열려요. 허용한 뒤 이 창으로 돌아와 Enter 를 누르세요.")
         colab("drivemount", "-s", session)
         say("  ✅ Google Drive 연결 완료")
+        drive = VM_CONTENT + "/drive/MyDrive/subtitle-remover"
         out = colab_exec_code(session, "import os, subprocess\n"
-                                       f"os.makedirs({json.dumps(VM_CONTENT + '/drive/MyDrive/subtitle-remover/input')}, exist_ok=True)\n"
-                                       f"os.makedirs({json.dumps(VM_CONTENT + '/drive/MyDrive/subtitle-remover/output')}, exist_ok=True)\n"
+                                       f"os.makedirs({json.dumps(drive + '/input')}, exist_ok=True)\n"
+                                       f"os.makedirs({json.dumps(drive + '/output')}, exist_ok=True)\n"
                                        "try:\n"
-                                       "    gpu = subprocess.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],"
-                                       " capture_output=True, text=True).stdout.strip()\n"
+                                       "    gpu = subprocess.run(['nvidia-smi', '--query-gpu=name',"
+                                       " '--format=csv,noheader'], capture_output=True, text=True).stdout.strip()\n"
                                        "except OSError:\n"
                                        "    gpu = ''\n"
                                        "print('@@GPU ' + (gpu or 'none'))\n")
@@ -423,6 +418,13 @@ def cmd_run(args) -> None:
     videos = list_videos(folder)
     if not videos:
         raise Stop(f"{folder} 에 영상 파일이 없어요 ({', '.join(sorted(VIDEO_EXTS))}).")
+    same_name: dict[str, list[str]] = {}
+    for v in videos:  # a.mp4 and a.mov would both become a_clean.mp4, one overwriting the other
+        same_name.setdefault(v.stem.lower(), []).append(v.name)
+    clashes = [" / ".join(names) for names in same_name.values() if len(names) > 1]
+    if clashes:
+        raise Stop(f"이름이 같은 영상이 있어요: {', '.join(clashes)}. 결과 파일 이름(원래이름_clean.mp4)이 겹쳐서 "
+                   "하나만 남으니, 이름을 바꾼 뒤 다시 실행해 주세요.")
     total_mb = sum(v.stat().st_size for v in videos) / 1e6
     say(f"\n영상 {len(videos)}개 ({total_mb:.0f}MB)")
     started = time.monotonic()
@@ -506,7 +508,8 @@ def cmd_run(args) -> None:
     for j in result["jobs"]:
         for line in job_summary(j):
             say(line)
-    say("  처리 기록은 같은 폴더의 _log.txt 에 남아요.")
+    if result["jobs"]:
+        say("  처리 기록은 같은 폴더의 _log.txt 에 남아요.")
     if drive_root and name not in {j["name"] for j in result["jobs"]}:
         say(f"  ⚠️ 이번 영상(input/{name})이 Colab에 아직 안 보여서 처리하지 못했어요. Drive 앱이 업로드를 마치면 "
             "다음 실행 때 처리돼요.")
